@@ -17,6 +17,7 @@ import (
 	"github.com/spencercornish/kilnlab/internal/auth"
 	"github.com/spencercornish/kilnlab/internal/config"
 	"github.com/spencercornish/kilnlab/internal/db"
+	"github.com/spencercornish/kilnlab/internal/notify"
 )
 
 type Server struct {
@@ -27,6 +28,9 @@ type Server struct {
 	webFS     fs.FS
 	logger    *slog.Logger
 	now       func() time.Time
+
+	notifyCfg notify.Config
+	notifier  *notify.Worker // optional; Kick()ed after changes so sends go out promptly
 
 	trustedProxies []netip.Prefix
 }
@@ -42,9 +46,21 @@ func New(cfg *config.Config, pool *pgxpool.Pool, providers map[string]auth.Provi
 	}
 	return &Server{
 		cfg: cfg, pool: pool, queries: db.New(pool), providers: providers, webFS: webFS,
-		logger: logger, now: time.Now, trustedProxies: trusted,
+		logger: logger, now: time.Now, trustedProxies: trusted, notifyCfg: NotifyConfig(cfg),
 	}
 }
+
+// NotifyConfig derives the notification settings from the app config.
+func NotifyConfig(cfg *config.Config) notify.Config {
+	return notify.Config{
+		BaseURL: cfg.AppBaseURL, DiscordBotToken: cfg.DiscordBotToken, SlackBotToken: cfg.SlackBotToken,
+		DiscordChannelFallback: cfg.DiscordChannelIDFallback, SlackChannelFallback: cfg.SlackChannelIDFallback,
+		DryRun: cfg.NotificationsDryRun,
+	}
+}
+
+// SetNotifier lets the server wake the outbox worker after each change.
+func (s *Server) SetNotifier(w *notify.Worker) { s.notifier = w }
 
 func (s *Server) Addr() string { return fmt.Sprintf(":%d", s.cfg.Port) }
 
@@ -85,6 +101,7 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/kiln", s.handleKiln)
 			r.Get("/admin/users", s.handleListUsers)
 			r.Patch("/admin/users/{id}", s.handleUpdateUser)
+			r.Get("/admin/notifications", s.handleListOutbox)
 
 			r.Get("/firings", s.handleListFirings)
 			r.Post("/firings", s.handleCreateFiring)

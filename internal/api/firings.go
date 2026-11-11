@@ -17,6 +17,7 @@ import (
 
 	"github.com/spencercornish/kilnlab/internal/db"
 	"github.com/spencercornish/kilnlab/internal/firing"
+	"github.com/spencercornish/kilnlab/internal/notify"
 )
 
 // ── Errors ──────────────────────────────────────────────────────────────────
@@ -547,12 +548,16 @@ func (s *Server) handleCreateFiring(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		id = f.ID
-		return s.logEvent(ctx, q, f, u, firing.EventCreated, nil, &f.Status, nil)
+		if err := s.logEvent(ctx, q, f, u, firing.EventCreated, nil, &f.Status, nil); err != nil {
+			return err
+		}
+		return notify.Enqueue(ctx, q, s.notifyCfg, f.ID, u.ID, &notify.Batch{})
 	})
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
+	s.notifier.Kick()
 	d, err := s.firingDetail(r.Context(), s.queries, id, u)
 	if err != nil {
 		s.fail(w, r, err)

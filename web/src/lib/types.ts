@@ -236,3 +236,22 @@ export interface RequestInput {
   clay_body: string | null
   glazed: boolean
 }
+
+export interface OutboxItem {
+  id: number
+  kind: 'channel_upsert' | 'dm'
+  platform: 'discord' | 'slack'
+  status: 'pending' | 'sent' | 'failed'
+  attempts: number
+  last_error: string | null
+  next_attempt_at: string
+  created_at: string
+  payload: { firing_id?: number; user_id?: number; thread?: string; text?: string }
+}
+
+export interface NotificationLog {
+  dry_run: boolean
+  discord: boolean
+  slack: boolean
+  items: OutboxItem[]
+}

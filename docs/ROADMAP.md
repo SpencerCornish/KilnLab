@@ -8,7 +8,7 @@ questions live in [DECISIONS.md](DECISIONS.md).
 
 Legend: ✅ done & tested · 🟡 partial · ⬜ not started · 🚫 blocked on owner
 
-_Last updated: 2026-11-11, end of M2 (code complete, awaiting owner check-in). M1 signed off by owner._
+_Last updated: 2026-11-11, end of M3 (code complete, awaiting owner check-in). M1 + M2 signed off and committed (`051a3ab`)._
 
 ---
 
@@ -18,9 +18,9 @@ _Last updated: 2026-11-11, end of M2 (code complete, awaiting owner check-in). M
 |---|:-:|---|
 | M0 — Scaffold & auth | 🟡 code ✅, phone verification 🚫 | Done 2026-11-11 |
 | M1 — Firings & requests | ✅ | Signed off 2026-11-11. Built on the defaults for open questions 1–5; multi-kiln added (D24) |
-| M2 — Status lifecycle & kiln QR | ✅ code complete | **Check-in pending**; phone check of `/kiln` still to do |
-| M3 — Notifications | ⬜ next | Needs Discord bot + Slack bot tokens and channel IDs from the owner to test for real |
-| M4 — Jobs, public page, calendar, admin settings | ⬜ | |
+| M2 — Status lifecycle & kiln QR | ✅ | Signed off 2026-11-11. Phone check of `/kiln` still to do |
+| M3 — Notifications | ✅ code complete | **Check-in pending.** Tested against fake Discord/Slack servers + dry run; real bots need owner tokens + channel IDs |
+| M4 — Jobs, public page, calendar, admin settings | ⬜ next | |
 | Stretch (§15) | ⬜ | Only after v1 and with owner's OK |
 
 The spec says to check in with the owner at the end of each milestone. Don't roll into the next one without that.
@@ -95,11 +95,18 @@ reschedule, cancel, close/reopen requests; unit tests for state machine, permiss
 
 | Item | Status | Notes |
 |---|:-:|---|
-| Outbox worker: retries with exponential backoff, ~8 attempts, then `failed` | ⬜ | Failures must never block state changes |
-| Discord: embed main message, PATCH in place, thread replies, DMs | ⬜ | Handle "cannot DM" without endless retries |
-| Slack: Block Kit main message, `chat.update`, `thread_ts` replies, DMs | ⬜ | Needs a bot token; webhooks can't edit |
-| Render-hash dedupe (`last_rendered_hash`) | ⬜ | |
-| DMs: approve/decline, reschedule/cancel/hold, ready for pickup | ⬜ | DM goes to the platform the user signed in with |
+| Outbox enqueued in the same transaction as every change | ✅ | `notify.Enqueue` from `mutateFiring` / create. Failures never block a change |
+| Outbox worker: backoff 30s→1h, 8 attempts, then `failed`; permanent errors fail at once | ✅ | `internal/notify/worker.go`; woken right after each change, else polls every 10s |
+| Discord: embed main message, PATCH in place, thread created on first reply, DMs | ✅ | "Cannot DM" (403) fails permanently, no endless retries. Deleted message → reposted |
+| Slack: Block Kit main message, `chat.update`, `thread_ts` replies, DMs to user id | ✅ | |
+| Render-hash dedupe (`last_rendered_hash`) | ✅ | Unchanged cards aren't re-edited |
+| Thread replies: started, ready for pickup, cancelled, rescheduled | ✅ | Open question 11 default |
+| DMs: approved/declined (with note), hold/reschedule/cancel (all participants), ready (approved + proposer) | ✅ | To the platform the user signed in with; the actor is never DMed about their own action |
+| `NOTIFICATIONS_DRY_RUN` for local dev (logs instead of sending, no tokens needed) | ✅ | On in `.env.example` |
+| Admin notification log on `/admin` (status, attempts, last error) | ✅ | `GET /api/admin/notifications` |
+| Tests | ✅ | `internal/notify/*_test.go` (fake APIs), `internal/api/notify_integration_test.go` |
+| **Real Discord bot + Slack bot posting to real channels** | 🚫 | Owner: bot tokens, invite bots, channel IDs (README) |
+| Kiln-master alert DMs (under-filled, missed start/unload) | ⬜ | M4 jobs; `notify.Enqueue` with firingID 0 + `ListKilnMasterIDs` are ready |
 
 ## M4 — Jobs, public page, calendar
 

@@ -18,6 +18,7 @@ import (
 	"github.com/spencercornish/kilnlab/internal/auth"
 	"github.com/spencercornish/kilnlab/internal/config"
 	"github.com/spencercornish/kilnlab/internal/db"
+	"github.com/spencercornish/kilnlab/internal/notify"
 	"github.com/spencercornish/kilnlab/internal/webembed"
 )
 
@@ -78,6 +79,18 @@ func main() {
 	}
 
 	srv := api.New(cfg, pool, providers, webFS, logger)
+
+	// Notification outbox worker (Discord/Slack). Sends never block requests.
+	notifyCfg := api.NotifyConfig(cfg)
+	switch {
+	case cfg.NotificationsDryRun:
+		slog.Warn("NOTIFICATIONS_DRY_RUN enabled: Discord/Slack messages are logged, not sent")
+	case cfg.DiscordBotToken == "" && cfg.SlackBotToken == "":
+		slog.Warn("no DISCORD_BOT_TOKEN or SLACK_BOT_TOKEN: notifications are off")
+	}
+	worker := notify.NewWorker(pool, notifyCfg, logger, notify.WorkerOptions{})
+	srv.SetNotifier(worker)
+	go worker.Run(ctx)
 	httpSrv := &http.Server{
 		Addr:              srv.Addr(),
 		Handler:           srv.Handler(),

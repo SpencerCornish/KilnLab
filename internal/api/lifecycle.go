@@ -12,6 +12,7 @@ import (
 
 	"github.com/spencercornish/kilnlab/internal/db"
 	"github.com/spencercornish/kilnlab/internal/firing"
+	"github.com/spencercornish/kilnlab/internal/notify"
 )
 
 // ── Programs (settings.programs) ────────────────────────────────────────────
@@ -75,7 +76,7 @@ func (s *Server) handleAdvance(w http.ResponseWriter, r *http.Request) {
 	if !s.readJSON(w, r, &in) {
 		return
 	}
-	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser) ([]string, error) {
+	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser, n *notify.Batch) ([]string, error) {
 		if !in.To.Valid() {
 			return nil, badRequest("unknown status")
 		}
@@ -135,8 +136,21 @@ func (s *Server) handleAdvance(w http.ResponseWriter, r *http.Request) {
 		if eventNote == nil {
 			eventNote = note
 		}
-		if _, err := q.AdvanceFiring(ctx, p); err != nil {
+		updated, err := q.AdvanceFiring(ctx, p)
+		if err != nil {
 			return nil, err
+		}
+		loc := s.studioLocation(ctx, q)
+		switch in.To {
+		case firing.Firing:
+			n.ThreadReply(notify.ThreadStarted(updated, loc))
+		case firing.ReadyForPickup:
+			n.ThreadReply(notify.ThreadReady())
+			ids, err := q.ListParticipants(ctx, db.ListParticipantsParams{FiringID: f.ID, Statuses: []string{string(db.RequestStatusApproved)}})
+			if err != nil {
+				return nil, err
+			}
+			n.DM(ids, notify.DMReady(f, loc, notify.FiringURL(s.cfg.AppBaseURL, f.ID)))
 		}
 		from := f.Status
 		return nil, q.InsertEvent(ctx, db.InsertEventParams{
@@ -177,7 +191,7 @@ func (s *Server) handleCorrectTimestamp(w http.ResponseWriter, r *http.Request) 
 	if !s.readJSON(w, r, &in) {
 		return
 	}
-	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser) ([]string, error) {
+	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser, n *notify.Batch) ([]string, error) {
 		if !u.Roles.CanCorrectTimestamps() {
 			return nil, forbidden("only kiln masters can correct times")
 		}
@@ -375,4 +389,40 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ── Notification log (/admin) ───────────────────────────────────────────────
+
+type outboxDTO struct {
+	ID            int64           `json:"id"`
+	Kind          db.OutboxKind   `json:"kind"`
+	Platform      db.AuthProvider `json:"platform"`
+	Status        db.OutboxStatus `json:"status"`
+	Attempts      int32           `json:"attempts"`
+	LastError     *string         `json:"last_error"`
+	NextAttemptAt time.Time       `json:"next_attempt_at"`
+	CreatedAt     time.Time       `json:"created_at"`
+	Payload       json.RawMessage `json:"payload"`
+}
+
+// handleListOutbox shows recent notifications so admins can spot failures.
+func (s *Server) handleListOutbox(w http.ResponseWriter, r *http.Request) {
+	if !userFromContext(r.Context()).Roles.CanEditSettings() {
+		s.fail(w, r, forbidden("only admins can see the notification log"))
+		return
+	}
+	rows, err := s.queries.ListOutbox(r.Context(), 100)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	out := make([]outboxDTO, 0, len(rows))
+	for _, o := range rows {
+		out = append(out, outboxDTO{ID: o.ID, Kind: o.Kind, Platform: o.Platform, Status: o.Status, Attempts: o.Attempts,
+			LastError: o.LastError, NextAttemptAt: o.NextAttemptAt, CreatedAt: o.CreatedAt, Payload: o.Payload})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"dry_run": s.notifyCfg.DryRun, "discord": s.notifyCfg.DiscordBotToken != "", "slack": s.notifyCfg.SlackBotToken != "",
+		"items": out,
+	})
 }

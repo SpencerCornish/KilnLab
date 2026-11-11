@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { Link, Navigate } from 'react-router'
 import { Alert } from '../components/firing'
-import { listUsers, updateUser } from '../lib/api'
+import { getNotificationLog, listUsers, updateUser } from '../lib/api'
 import { PageSpinner, useSession } from '../lib/session'
 import { relative } from '../lib/time'
-import type { AdminUser } from '../lib/types'
+import type { AdminUser, OutboxItem } from '../lib/types'
 import { useLoad } from '../lib/useLoad'
 
 export function AdminIndexPage() {
@@ -17,9 +17,62 @@ export function AdminIndexPage() {
         People &amp; self-loaders
       </Link>
       {me.roles.admin && (
-        <div className="card text-stone-600">Studio settings (kilns, cones, programs, channels) are coming soon.</div>
+        <>
+          <div className="card text-stone-600">Studio settings (kilns, cones, programs, channels) are coming soon.</div>
+          <NotificationLogSection />
+        </>
       )}
     </div>
+  )
+}
+
+const OUTBOX_STATUS: Record<OutboxItem['status'], string> = {
+  pending: 'bg-amber-100 text-amber-900',
+  sent: 'bg-green-100 text-green-900',
+  failed: 'bg-red-100 text-red-900',
+}
+
+function NotificationLogSection() {
+  const { data, error, reload } = useLoad(getNotificationLog, [])
+  if (error) return <Alert kind="error">{error}</Alert>
+  if (!data) return <PageSpinner />
+  const mode = data.dry_run
+    ? 'Dry run: messages are logged, not sent.'
+    : [data.discord ? 'Discord on' : 'Discord off (no bot token)', data.slack ? 'Slack on' : 'Slack off (no bot token)'].join(' · ')
+  return (
+    <section className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-bold">Notifications</h2>
+        <button onClick={() => void reload()} className="rounded-lg px-3 py-2 text-sm font-semibold text-orange-700">
+          Refresh
+        </button>
+      </div>
+      <p className="text-sm text-stone-600">{mode}</p>
+      {data.items.length === 0 && <p className="text-stone-500">Nothing sent yet.</p>}
+      <ul className="space-y-2">
+        {data.items.map((o) => (
+          <li key={o.id} className="card space-y-1 py-3">
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <span className={`rounded-full px-2 py-0.5 font-semibold ${OUTBOX_STATUS[o.status]}`}>{o.status}</span>
+              <span className="font-semibold capitalize">{o.platform}</span>
+              <span className="text-stone-600">
+                {o.kind === 'dm' ? 'DM' : 'channel message'}
+                {o.payload.firing_id ? ` · firing #${o.payload.firing_id}` : ''}
+              </span>
+              <span className="ml-auto text-stone-500">{relative(o.created_at)}</span>
+            </div>
+            {(o.payload.text || o.payload.thread) && (
+              <p className="line-clamp-2 text-sm text-stone-700">{o.payload.text ?? `Thread: ${o.payload.thread}`}</p>
+            )}
+            {o.last_error && (
+              <p className="text-sm text-red-800">
+                {o.attempts} attempt{o.attempts === 1 ? '' : 's'}: {o.last_error}
+              </p>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
   )
 }
 

@@ -3,6 +3,7 @@ import type {
   AdvanceInput,
   AuthProviders,
   KilnView,
+  NotificationLog,
   TimestampField,
   FiringDetail,
   FiringSummary,
@@ -126,3 +127,5 @@ export const getKilnView = (kilnId: string | null) =>
 export const listUsers = () => request<AdminUser[]>('/admin/users')
 export const updateUser = (id: number, patch: { self_loader?: boolean; admin?: boolean }) =>
   request<void>(`/admin/users/${id}`, json('PATCH', patch))
+
+export const getNotificationLog = () => request<NotificationLog>('/admin/notifications')

@@ -8,6 +8,7 @@ import (
 
 	"github.com/spencercornish/kilnlab/internal/db"
 	"github.com/spencercornish/kilnlab/internal/firing"
+	"github.com/spencercornish/kilnlab/internal/notify"
 )
 
 // mutationResponse is the fresh firing detail plus any non-blocking warnings.
@@ -16,11 +17,11 @@ type mutationResponse struct {
 	Warnings []string `json:"warnings"`
 }
 
-type mutateFn func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser) (warnings []string, err error)
+type mutateFn func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser, n *notify.Batch) (warnings []string, err error)
 
 // mutateFiring locks the firing in {id} for the length of a transaction, runs
-// fn, and responds with the updated detail. M3 will enqueue notifications in
-// the same transaction.
+// fn, enqueues notifications (main message refresh plus whatever fn added to
+// the batch) in the same transaction, and responds with the updated detail.
 func (s *Server) mutateFiring(w http.ResponseWriter, r *http.Request, fn mutateFn) {
 	id, err := idParam(r, "id")
 	if err != nil {
@@ -34,13 +35,17 @@ func (s *Server) mutateFiring(w http.ResponseWriter, r *http.Request, fn mutateF
 		if err != nil {
 			return err
 		}
-		warnings, err = fn(r.Context(), q, f, u)
-		return err
+		var batch notify.Batch
+		if warnings, err = fn(r.Context(), q, f, u, &batch); err != nil {
+			return err
+		}
+		return notify.Enqueue(r.Context(), q, s.notifyCfg, f.ID, u.ID, &batch)
 	})
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
+	s.notifier.Kick()
 	d, err := s.firingDetail(r.Context(), s.queries, id, u)
 	if err != nil {
 		s.fail(w, r, err)
@@ -117,7 +122,7 @@ func (s *Server) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 	if !s.readJSON(w, r, &in) {
 		return
 	}
-	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser) ([]string, error) {
+	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser, n *notify.Batch) ([]string, error) {
 		if f.ProposedByUserID == u.ID {
 			return nil, conflict("you proposed this firing, so your work is already in it")
 		}
@@ -176,7 +181,7 @@ func (s *Server) handleUpdateRequest(w http.ResponseWriter, r *http.Request) {
 	if !s.readJSON(w, r, &in) {
 		return
 	}
-	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser) ([]string, error) {
+	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser, n *notify.Batch) ([]string, error) {
 		rq, err := s.lockOwnRequest(ctx, r, q, f, u)
 		if err != nil {
 			return nil, err
@@ -218,7 +223,7 @@ func removeOne(xs []int32, v int32) []int32 {
 }
 
 func (s *Server) handleWithdrawRequest(w http.ResponseWriter, r *http.Request) {
-	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser) ([]string, error) {
+	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser, n *notify.Batch) ([]string, error) {
 		rq, err := s.lockOwnRequest(ctx, r, q, f, u)
 		if err != nil {
 			return nil, err
@@ -241,7 +246,7 @@ func (s *Server) handleDecideRequest(w http.ResponseWriter, r *http.Request) {
 	if !s.readJSON(w, r, &in) {
 		return
 	}
-	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser) ([]string, error) {
+	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser, n *notify.Batch) ([]string, error) {
 		if !u.Roles.CanDecideRequests(f.ProposedByUserID == u.ID) {
 			return nil, forbidden("only kiln masters can approve or decline requests")
 		}
@@ -298,6 +303,12 @@ func (s *Server) handleDecideRequest(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return nil, err
 		}
+		loc, url := s.studioLocation(ctx, q), notify.FiringURL(s.cfg.AppBaseURL, f.ID)
+		if status == db.RequestStatusApproved {
+			n.DM([]int64{rq.UserID}, notify.DMApproved(f, loc, note, url))
+		} else {
+			n.DM([]int64{rq.UserID}, notify.DMDeclined(f, loc, note, url))
+		}
 		verb := map[db.RequestStatus]string{db.RequestStatusApproved: "Approved", db.RequestStatusDeclined: "Declined"}[status]
 		ev := fmt.Sprintf("%s %s's request (%d%%)", verb, name, rq.EstimatedSharePct)
 		return warnings, s.logEvent(ctx, q, f, u, event, nil, nil, &ev)
@@ -333,7 +344,7 @@ func (s *Server) changeStatus(ctx context.Context, q *db.Queries, f db.Firing, u
 }
 
 func (s *Server) handleConfirm(w http.ResponseWriter, r *http.Request) {
-	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser) ([]string, error) {
+	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser, n *notify.Batch) ([]string, error) {
 		to, err := firing.Confirm(stateOf(f), actorFor(f, u))
 		if err != nil {
 			return nil, err
@@ -352,7 +363,7 @@ func (s *Server) handleHold(w http.ResponseWriter, r *http.Request) {
 	if !s.readJSON(w, r, &in) {
 		return
 	}
-	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser) ([]string, error) {
+	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser, n *notify.Batch) ([]string, error) {
 		to, err := firing.Hold(stateOf(f), actorFor(f, u))
 		if err != nil {
 			return nil, err
@@ -361,8 +372,10 @@ func (s *Server) handleHold(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return nil, err
 		}
-		_, err = s.changeStatus(ctx, q, f, u, to, &reason, nil, &reason)
-		return nil, err
+		if _, err = s.changeStatus(ctx, q, f, u, to, &reason, nil, &reason); err != nil {
+			return nil, err
+		}
+		return nil, s.dmParticipants(ctx, q, f, n, notify.DMOnHold(f, s.studioLocation(ctx, q), reason, notify.FiringURL(s.cfg.AppBaseURL, f.ID)))
 	})
 }
 
@@ -371,7 +384,7 @@ func (s *Server) handleCancel(w http.ResponseWriter, r *http.Request) {
 	if !s.readJSON(w, r, &in) {
 		return
 	}
-	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser) ([]string, error) {
+	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser, n *notify.Batch) ([]string, error) {
 		to, err := firing.Cancel(stateOf(f), actorFor(f, u))
 		if err != nil {
 			return nil, err
@@ -380,8 +393,11 @@ func (s *Server) handleCancel(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return nil, err
 		}
-		_, err = s.changeStatus(ctx, q, f, u, to, nil, &reason, &reason)
-		return nil, err
+		if _, err = s.changeStatus(ctx, q, f, u, to, nil, &reason, &reason); err != nil {
+			return nil, err
+		}
+		n.ThreadReply(notify.ThreadCancelled(reason))
+		return nil, s.dmParticipants(ctx, q, f, n, notify.DMCancelled(f, s.studioLocation(ctx, q), reason, notify.FiringURL(s.cfg.AppBaseURL, f.ID)))
 	})
 }
 
@@ -391,7 +407,7 @@ type rescheduleInput struct {
 }
 
 // reschedule moves the start (and the automatic requests cutoff with it).
-func (s *Server) reschedule(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser, start time.Time, note *string) error {
+func (s *Server) reschedule(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser, n *notify.Batch, start time.Time, note *string) error {
 	start = start.UTC()
 	if !start.After(s.now()) {
 		return badRequest("the new start time must be in the future")
@@ -414,7 +430,11 @@ func (s *Server) reschedule(ctx context.Context, q *db.Queries, f db.Firing, u *
 	if note != nil {
 		ev += ": " + *note
 	}
-	return s.logEvent(ctx, q, f, u, firing.EventRescheduled, nil, nil, &ev)
+	if err := s.logEvent(ctx, q, f, u, firing.EventRescheduled, nil, nil, &ev); err != nil {
+		return err
+	}
+	n.ThreadReply(notify.ThreadRescheduled(start, loc))
+	return s.dmParticipants(ctx, q, f, n, notify.DMRescheduled(f, start, loc, notify.FiringURL(s.cfg.AppBaseURL, f.ID)))
 }
 
 // handleRelease: on_hold → proposed/confirmed, optionally with a new start.
@@ -423,7 +443,7 @@ func (s *Server) handleRelease(w http.ResponseWriter, r *http.Request) {
 	if !s.readJSON(w, r, &in) {
 		return
 	}
-	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser) ([]string, error) {
+	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser, n *notify.Batch) ([]string, error) {
 		to, err := firing.Release(stateOf(f), actorFor(f, u))
 		if err != nil {
 			return nil, err
@@ -433,7 +453,7 @@ func (s *Server) handleRelease(w http.ResponseWriter, r *http.Request) {
 			return nil, err
 		}
 		if in.ScheduledStart != nil && !in.ScheduledStart.Equal(f.ScheduledStart) {
-			if err := s.reschedule(ctx, q, f, u, *in.ScheduledStart, nil); err != nil {
+			if err := s.reschedule(ctx, q, f, u, n, *in.ScheduledStart, nil); err != nil {
 				return nil, err
 			}
 		}
@@ -447,7 +467,7 @@ func (s *Server) handleReschedule(w http.ResponseWriter, r *http.Request) {
 	if !s.readJSON(w, r, &in) {
 		return
 	}
-	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser) ([]string, error) {
+	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser, n *notify.Batch) ([]string, error) {
 		if err := firing.Reschedule(stateOf(f), actorFor(f, u)); err != nil {
 			return nil, err
 		}
@@ -462,7 +482,7 @@ func (s *Server) handleReschedule(w http.ResponseWriter, r *http.Request) {
 		if f.RequestsClosedManually {
 			warnings = append(warnings, "Requests are still closed; reopen them if you want more work.")
 		}
-		return warnings, s.reschedule(ctx, q, f, u, *in.ScheduledStart, note)
+		return warnings, s.reschedule(ctx, q, f, u, n, *in.ScheduledStart, note)
 	})
 }
 
@@ -486,7 +506,7 @@ func (s *Server) handleFullnessOverride(w http.ResponseWriter, r *http.Request) 
 	if !s.readJSON(w, r, &in) {
 		return
 	}
-	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser) ([]string, error) {
+	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser, n *notify.Batch) ([]string, error) {
 		if err := requireManage(f, u); err != nil {
 			return nil, err
 		}
@@ -513,7 +533,7 @@ func (s *Server) handleRequestsWindow(w http.ResponseWriter, r *http.Request) {
 	if !s.readJSON(w, r, &in) {
 		return
 	}
-	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser) ([]string, error) {
+	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser, n *notify.Batch) ([]string, error) {
 		if err := requireManage(f, u); err != nil {
 			return nil, err
 		}
@@ -544,7 +564,7 @@ func (s *Server) handleAssignLoader(w http.ResponseWriter, r *http.Request) {
 	if !s.readJSON(w, r, &in) {
 		return
 	}
-	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser) ([]string, error) {
+	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser, n *notify.Batch) ([]string, error) {
 		if err := requireManage(f, u); err != nil {
 			return nil, err
 		}
@@ -592,4 +612,16 @@ func (s *Server) handleLoaderCandidates(w http.ResponseWriter, r *http.Request) 
 		out = append(out, loaderCandidateDTO{row.ID, row.DisplayName, row.IsKilnMaster, row.IsSelfLoader})
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// dmParticipants DMs the proposer and everyone with a pending or approved request.
+func (s *Server) dmParticipants(ctx context.Context, q *db.Queries, f db.Firing, n *notify.Batch, text string) error {
+	ids, err := q.ListParticipants(ctx, db.ListParticipantsParams{
+		FiringID: f.ID, Statuses: []string{string(db.RequestStatusPending), string(db.RequestStatusApproved)},
+	})
+	if err != nil {
+		return err
+	}
+	n.DM(ids, text)
+	return nil
 }

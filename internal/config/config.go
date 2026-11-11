@@ -46,6 +46,10 @@ type Config struct {
 	// when APP_BASE_URL is https.
 	DevLogin bool `envconfig:"DEV_LOGIN" default:"false"`
 
+	// NotificationsDryRun logs Discord/Slack notifications instead of sending
+	// them, even without bot tokens. For local development.
+	NotificationsDryRun bool `envconfig:"NOTIFICATIONS_DRY_RUN" default:"false"`
+
 	CORSAllowedOrigins string `envconfig:"CORS_ALLOWED_ORIGINS" default:""`
 	TrustedProxies     string `envconfig:"TRUSTED_PROXIES" default:"127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7"`
 }

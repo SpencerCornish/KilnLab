@@ -33,7 +33,7 @@ func openTestPool(t *testing.T) *pgxpool.Pool {
 	}
 	t.Cleanup(pool.Close)
 	// Truncating users cascades to firings and everything under them.
-	if _, err := pool.Exec(ctx, `TRUNCATE users, accounts, sessions, oauth_states RESTART IDENTITY CASCADE`); err != nil {
+	if _, err := pool.Exec(ctx, `TRUNCATE users, accounts, sessions, oauth_states, notification_outbox RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 	// Back to the single kiln seeded by the first migration.

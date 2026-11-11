@@ -35,6 +35,11 @@ default currently in use. When the owner answers a question, move it to Decision
 | D25 | 2026-11-11 | **Back-dating** (kiln masters only): up to 7 days back, never more than 5 min in the future, never before the firing's last recorded step. Others' times are always "now" | §6/§12 accuracy without letting the timeline get scrambled |
 | D26 | 2026-11-11 | Kiln QR flow lives at `/kiln` (pick list) and `/kiln/:id` (actions), so a single relevant firing redirects to a real URL | Refresh-safe and shareable on a phone |
 | D27 | 2026-11-11 | Admins can't remove their own admin flag in the app | Avoids locking yourself out (`ADMIN_USER_IDS` would also re-grant at next login) |
+| D28 | 2026-11-11 | **Worker renders the main message at send time** from the firing's current state; outbox rows only carry the firing id (+ thread text). DMs carry their text | Coalesces bursts of edits and never posts stale state |
+| D29 | 2026-11-11 | Thread-reply text rides on the `channel_upsert` row (no new outbox kind) | The thread hangs off the main message, so they're delivered together, in order |
+| D30 | 2026-11-11 | DMs go to the user's first account's platform; the actor is never DMed about their own action | §11 "platform they signed in with"; avoids self-notifications |
+| D31 | 2026-11-11 | Changing the channel in settings only affects firings without a message yet | Keeps edit-in-place simple |
+| D32 | 2026-11-11 | `NOTIFICATIONS_DRY_RUN` logs rendered messages instead of sending | Develop/demo notifications without bot tokens |
 | D23 | 2026-11-11 | Datetimes are entered and shown in `settings.timezone`, not the phone's timezone. Binary embeds `time/tzdata` | Everyone sees studio wall time |
 
 ---

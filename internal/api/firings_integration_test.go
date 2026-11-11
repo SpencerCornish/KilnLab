@@ -30,10 +30,13 @@ func newFiringEnv(t *testing.T) *firingEnv {
 	return env
 }
 
-func newFiringEnvPool(t *testing.T) (*firingEnv, *pgxpool.Pool) {
+func newFiringEnvPool(t *testing.T, tweak ...func(*config.Config)) (*firingEnv, *pgxpool.Pool) {
 	pool := openTestPool(t)
 	env := &firingEnv{t: t, now: time.Now().UTC().Truncate(time.Second)} // sessions expire against the DB clock
 	cfg := &config.Config{AppBaseURL: "http://localhost", DevLogin: true}
+	for _, f := range tweak {
+		f(cfg)
+	}
 	s := New(cfg, pool, nil, nil, slog.New(slog.DiscardHandler))
 	s.now = func() time.Time { env.mu.Lock(); defer env.mu.Unlock(); return env.now }
 	env.srv = httptest.NewServer(s.Handler())
