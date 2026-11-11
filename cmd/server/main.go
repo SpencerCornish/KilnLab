@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	_ "time/tzdata" // studio timezone without relying on the container having zoneinfo
 
 	"github.com/joho/godotenv"
 

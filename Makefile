@@ -1,7 +1,7 @@
 # KilnLab Makefile — run `make help` for targets.
 
 .DEFAULT_GOAL := help
-.PHONY: help setup install-tools dev dev-api dev-web db db-stop db-reset \
+.PHONY: help setup install-tools dev dev-api dev-web db db-stop db-reset seed \
         build build-web build-api sqlc docker-up docker-down docker-logs \
         test test-unit lint fmt tidy clean
 
@@ -49,6 +49,9 @@ db-stop: ## Stop Postgres
 db-reset: ## Destroy and recreate the dev database volume (deletes all data)
 	@$(DC) down -v
 	@$(MAKE) db
+
+seed: db ## Fill the dev database with sample users and firings
+	@$(GO) run ./cmd/seed
 
 sqlc: ## Regenerate internal/db from migrations + queries
 	@$(SQLC) generate

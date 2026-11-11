@@ -9,7 +9,7 @@ import (
 
 // spaRoutes are paths handled by the React router (see web/src/App.tsx).
 var spaExact = map[string]bool{"/": true, "/login": true, "/upcoming": true, "/kiln": true}
-var spaPrefixes = []string{"/firings/", "/admin/"}
+var spaPrefixes = []string{"/firings/", "/admin/", "/kiln/"}
 
 func isSPARoute(rawPath string) bool {
 	p := path.Clean(rawPath)

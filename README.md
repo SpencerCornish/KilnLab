@@ -8,7 +8,7 @@ mostly from a phone after scanning a QR code on the studio wall. Product spec: [
 
 The structure follows BookLab, with current dependency versions.
 
-- **Backend:** Go 1.26 (`cmd/server` plus `internal/{api,auth,config,db,policy,webembed}`), chi router
+- **Backend:** Go 1.26 (`cmd/server`, `cmd/seed`, plus `internal/{api,auth,config,db,firing,policy,webembed}`), chi router
 - **Database:** PostgreSQL 18 via pgx. Migrations are embedded and run on startup (golang-migrate). Queries are generated with **sqlc** from `internal/db/queries/*.sql`.
 - **Frontend:** React 19 + TypeScript 7 SPA (Vite 8, Tailwind 4, react-router 8), embedded into the Go binary
 - **Auth:** Discord OAuth2 (ArtLab guild membership + Kiln Master role) and Sign in with Slack (OIDC, BMS workspace check), using `golang.org/x/oauth2`. Sessions are stored in the DB behind a cookie, with double-submit CSRF.
@@ -30,7 +30,8 @@ make setup           # creates .env (DEV_LOGIN=true) and installs web deps
 make dev             # Postgres on :5433, API on :8080, Vite on :5173
 ```
 
-With `DEV_LOGIN=true`, the login page shows a form for signing in as any fake user and role, with no Discord or Slack app needed.
+Run `make seed` once for sample firings. With `DEV_LOGIN=true`, sign in as one of the seeded users (Kim the kiln master, Sam the self-loader, Alice, Bob on BMS, Carol) by typing their name.
+The login page shows a form for signing in as any fake user and role, with no Discord or Slack app needed.
 To test real OAuth through Vite, set `APP_BASE_URL=http://localhost:5173` so the callbacks come back via the Vite proxy.
 
 ```bash

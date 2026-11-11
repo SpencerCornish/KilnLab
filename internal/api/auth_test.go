@@ -22,7 +22,7 @@ func TestSafeReturnTo(t *testing.T) {
 }
 
 func TestIsSPARoute(t *testing.T) {
-	for _, p := range []string{"/", "/login", "/kiln", "/upcoming", "/firings/new", "/firings/3", "/admin/settings"} {
+	for _, p := range []string{"/", "/login", "/kiln", "/upcoming", "/firings/new", "/firings/3", "/admin/settings", "/kiln/3"} {
 		if !isSPARoute(p) {
 			t.Errorf("%s should be an SPA route", p)
 		}

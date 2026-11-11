@@ -531,6 +531,7 @@ type FiringRequest struct {
 	CompatibilityWarning *string       `json:"compatibility_warning"`
 	CreatedAt            time.Time     `json:"created_at"`
 	UpdatedAt            time.Time     `json:"updated_at"`
+	Glazed               bool          `json:"glazed"`
 }
 
 type Kiln struct {

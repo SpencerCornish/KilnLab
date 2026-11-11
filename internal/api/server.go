@@ -80,6 +80,36 @@ func (s *Server) Handler() http.Handler {
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireUser)
 			r.Get("/me", s.handleMe)
+			r.Get("/options", s.handleOptions)
+			r.Get("/loaders", s.handleLoaderCandidates)
+			r.Get("/kiln", s.handleKiln)
+			r.Get("/admin/users", s.handleListUsers)
+			r.Patch("/admin/users/{id}", s.handleUpdateUser)
+
+			r.Get("/firings", s.handleListFirings)
+			r.Post("/firings", s.handleCreateFiring)
+			r.Route("/firings/{id}", func(r chi.Router) {
+				r.Get("/", s.handleGetFiring)
+
+				r.Post("/requests", s.handleCreateRequest)
+				r.Put("/requests/{rid}", s.handleUpdateRequest)
+				r.Post("/requests/{rid}/withdraw", s.handleWithdrawRequest)
+				r.Post("/requests/{rid}/decide", s.handleDecideRequest)
+
+				// Kiln master controls.
+				r.Post("/confirm", s.handleConfirm)
+				r.Post("/hold", s.handleHold)
+				r.Post("/release", s.handleRelease)
+				r.Post("/reschedule", s.handleReschedule)
+				r.Post("/cancel", s.handleCancel)
+				r.Put("/fullness-override", s.handleFullnessOverride)
+				r.Put("/requests-window", s.handleRequestsWindow)
+				r.Put("/loader", s.handleAssignLoader)
+
+				// Lifecycle: loading … completed, and fixing times afterwards.
+				r.Post("/status", s.handleAdvance)
+				r.Put("/timestamps", s.handleCorrectTimestamp)
+			})
 		})
 	})
 

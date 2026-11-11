@@ -9,12 +9,12 @@ import (
 	"context"
 )
 
-const getActiveKiln = `-- name: GetActiveKiln :one
-SELECT id, name, interior_width_in, interior_depth_in, interior_height_in, shelf_count, share_per_shelf_pct, active, created_at, updated_at FROM kilns WHERE active ORDER BY id LIMIT 1
+const getKiln = `-- name: GetKiln :one
+SELECT id, name, interior_width_in, interior_depth_in, interior_height_in, shelf_count, share_per_shelf_pct, active, created_at, updated_at FROM kilns WHERE id = $1
 `
 
-func (q *Queries) GetActiveKiln(ctx context.Context) (Kiln, error) {
-	row := q.db.QueryRow(ctx, getActiveKiln)
+func (q *Queries) GetKiln(ctx context.Context, id int64) (Kiln, error) {
+	row := q.db.QueryRow(ctx, getKiln, id)
 	var i Kiln
 	err := row.Scan(
 		&i.ID,
@@ -55,4 +55,40 @@ func (q *Queries) GetSettings(ctx context.Context) (Setting, error) {
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const listKilns = `-- name: ListKilns :many
+SELECT id, name, interior_width_in, interior_depth_in, interior_height_in, shelf_count, share_per_shelf_pct, active, created_at, updated_at FROM kilns ORDER BY active DESC, id
+`
+
+// Active kilns first; inactive ones are kept so old firings still show their kiln.
+func (q *Queries) ListKilns(ctx context.Context) ([]Kiln, error) {
+	rows, err := q.db.Query(ctx, listKilns)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Kiln
+	for rows.Next() {
+		var i Kiln
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.InteriorWidthIn,
+			&i.InteriorDepthIn,
+			&i.InteriorHeightIn,
+			&i.ShelfCount,
+			&i.SharePerShelfPct,
+			&i.Active,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

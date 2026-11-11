@@ -24,12 +24,24 @@ default currently in use. When the owner answers a question, move it to Decision
 | D13 | 2026-11-11 | **`DEV_LOGIN`**: fake sign-in with any role for local dev; server refuses to start with it on when `APP_BASE_URL` is https | Develop and test without real Discord/Slack apps |
 | D14 | 2026-11-11 | Added `settings.underfilled_threshold_pct` (default 50) and `firings.was_confirmed` (for release → confirmed) and `notification_messages.thread_id` (Discord thread) beyond the §8 table list | Needed by §6/§10/§11 behaviour |
 | D15 | 2026-11-11 | Kiln dimensions are `double precision`, not `numeric` | Plain floats in Go instead of `pgtype.Numeric` |
+| D16 | 2026-11-11 | **M1 built on the defaults for open questions 1–5** | Owner said "begin the next milestone". Q1 is one constant: `policy.ProposerCanDecideRequests` |
+| D17 | 2026-11-11 | State machine details the spec left open: **hold** only from proposed/confirmed; **forward skips** only from confirmed onwards (proposed must be confirmed first); **self-loaders** may move to loading/loaded/unloaded, can skip within those, never past the kiln start | Simplest reading of §6. All in `internal/firing/statemachine.go` |
+| D18 | 2026-11-11 | **One live (pending/approved) request per user per firing** (partial unique index). The proposer can't request in their own firing | Their share is the proposer entry |
+| D19 | 2026-11-11 | **Editing an approved request sends it back to pending** | The kiln master approved specific work and share |
+| D20 | 2026-11-11 | **Reopening requests after the automatic cutoff extends the window to the start time** | Otherwise "reopen" would do nothing after the cutoff |
+| D21 | 2026-11-11 | Members see others' live requests (name, work, share). **Decision notes and compatibility flags** are visible only to the requester and kiln masters; timeline entries never include decision notes | Privacy without hiding who's in |
+| D22 | 2026-11-11 | Requests can be approved/declined until the kiln starts (proposed … loaded) | Kiln master often decides at loading time |
+| D24 | 2026-11-11 | **Multiple kilns supported** (owner request). `/api/options` lists every kiln (active first); creating a firing takes `kiln_id`, optional while only one kiln is active. The kiln name is shown only when there are 2+ kilns. Kiln QR codes will carry the kiln (`/kiln?k=<id>`). Adding/editing kilns belongs on `/admin/settings` (M4) | Future-proofing |
+| D25 | 2026-11-11 | **Back-dating** (kiln masters only): up to 7 days back, never more than 5 min in the future, never before the firing's last recorded step. Others' times are always "now" | §6/§12 accuracy without letting the timeline get scrambled |
+| D26 | 2026-11-11 | Kiln QR flow lives at `/kiln` (pick list) and `/kiln/:id` (actions), so a single relevant firing redirects to a real URL | Refresh-safe and shareable on a phone |
+| D27 | 2026-11-11 | Admins can't remove their own admin flag in the app | Avoids locking yourself out (`ADMIN_USER_IDS` would also re-grant at next login) |
+| D23 | 2026-11-11 | Datetimes are entered and shown in `settings.timezone`, not the phone's timezone. Binary embeds `time/tzdata` | Everyone sees studio wall time |
 
 ---
 
 ## Open questions (spec §17), current defaults
 
-**Questions 1–5 change code logic. Ask before or during M1.** The rest are just values in settings.
+**Questions 1–5 change code logic.** M1 was built on the defaults (D16); changing them later is small. The rest are just values in settings.
 
 | # | Question | Default in use | Affects |
 |---|---|---|---|

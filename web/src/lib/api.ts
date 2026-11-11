@@ -1,4 +1,18 @@
-import type { AuthProviders, Me } from './types'
+import type {
+  AdminUser,
+  AdvanceInput,
+  AuthProviders,
+  KilnView,
+  TimestampField,
+  FiringDetail,
+  FiringSummary,
+  LoaderCandidate,
+  Me,
+  MutationResult,
+  NewFiring,
+  Options,
+  RequestInput,
+} from './types'
 
 function csrfToken(): string | undefined {
   const m = document.cookie.match(/(?:^|;\s*)kilnlab_csrf=([^;]+)/)
@@ -57,3 +71,58 @@ export const devLogin = (body: {
 export function loginURL(provider: 'discord' | 'slack', returnTo: string): string {
   return `/api/auth/${provider}/start?return_to=${encodeURIComponent(returnTo)}`
 }
+
+// ── Firings ─────────────────────────────────────────────────────────────────
+
+let optionsPromise: Promise<Options> | null = null
+/** Form options (cones, types, kiln size, timezone). Fetched once per page load. */
+export function getOptions(): Promise<Options> {
+  optionsPromise ??= request<Options>('/options').catch((e) => {
+    optionsPromise = null
+    throw e
+  })
+  return optionsPromise
+}
+
+const json = (method: string, body?: unknown): RequestInit => ({
+  method,
+  body: body === undefined ? undefined : JSON.stringify(body),
+})
+
+export const listFirings = () => request<FiringSummary[]>('/firings')
+export const getFiring = (id: number) => request<FiringDetail>(`/firings/${id}`)
+export const createFiring = (f: NewFiring) => request<FiringDetail>('/firings', json('POST', f))
+export const listLoaders = () => request<LoaderCandidate[]>('/loaders')
+
+const f = (id: number) => `/firings/${id}`
+export const firingActions = {
+  createRequest: (id: number, r: RequestInput) => request<MutationResult>(`${f(id)}/requests`, json('POST', r)),
+  updateRequest: (id: number, rid: number, r: RequestInput) =>
+    request<MutationResult>(`${f(id)}/requests/${rid}`, json('PUT', r)),
+  withdrawRequest: (id: number, rid: number) => request<MutationResult>(`${f(id)}/requests/${rid}/withdraw`, json('POST')),
+  decide: (id: number, rid: number, decision: 'approve' | 'decline', note: string | null) =>
+    request<MutationResult>(`${f(id)}/requests/${rid}/decide`, json('POST', { decision, note })),
+  confirm: (id: number) => request<MutationResult>(`${f(id)}/confirm`, json('POST')),
+  hold: (id: number, reason: string) => request<MutationResult>(`${f(id)}/hold`, json('POST', { reason })),
+  release: (id: number, scheduledStart: string | null) =>
+    request<MutationResult>(`${f(id)}/release`, json('POST', { scheduled_start: scheduledStart })),
+  reschedule: (id: number, scheduledStart: string, note: string | null) =>
+    request<MutationResult>(`${f(id)}/reschedule`, json('POST', { scheduled_start: scheduledStart, note })),
+  cancel: (id: number, reason: string) => request<MutationResult>(`${f(id)}/cancel`, json('POST', { reason })),
+  setFullness: (id: number, pct: number | null) =>
+    request<MutationResult>(`${f(id)}/fullness-override`, json('PUT', { override_pct: pct })),
+  setRequestsClosed: (id: number, closed: boolean) =>
+    request<MutationResult>(`${f(id)}/requests-window`, json('PUT', { closed })),
+  setLoader: (id: number, userId: number | null) =>
+    request<MutationResult>(`${f(id)}/loader`, json('PUT', { user_id: userId })),
+  advance: (id: number, input: AdvanceInput) => request<MutationResult>(`${f(id)}/status`, json('POST', input)),
+  correctTimestamp: (id: number, field: TimestampField, at: string) =>
+    request<MutationResult>(`${f(id)}/timestamps`, json('PUT', { field, at })),
+}
+
+export const getKilnView = (kilnId: string | null) =>
+  request<KilnView>(kilnId ? `/kiln?k=${encodeURIComponent(kilnId)}` : '/kiln')
+
+export const listUsers = () => request<AdminUser[]>('/admin/users')
+export const updateUser = (id: number, patch: { self_loader?: boolean; admin?: boolean }) =>
+  request<void>(`/admin/users/${id}`, json('PATCH', patch))
