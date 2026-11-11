@@ -8,7 +8,7 @@ mostly from a phone after scanning a QR code on the studio wall. Product spec: [
 
 The structure follows BookLab, with current dependency versions.
 
-- **Backend:** Go 1.26 (`cmd/server`, `cmd/seed`, plus `internal/{api,auth,config,db,firing,notify,policy,webembed}`), chi router
+- **Backend:** Go 1.26 (`cmd/server`, `cmd/seed`, plus `internal/{api,auth,config,db,firing,ical,jobs,notify,policy,webembed}`), chi router
 - **Database:** PostgreSQL 18 via pgx. Migrations are embedded and run on startup (golang-migrate). Queries are generated with **sqlc** from `internal/db/queries/*.sql`.
 - **Frontend:** React 19 + TypeScript 7 SPA (Vite 8, Tailwind 4, react-router 8), embedded into the Go binary
 - **Auth:** Discord OAuth2 (ArtLab guild membership + Kiln Master role) and Sign in with Slack (OIDC, BMS workspace check), using `golang.org/x/oauth2`. Sessions are stored in the DB behind a cookie, with double-submit CSRF.
@@ -42,6 +42,12 @@ make build       # SPA + ./kilnlab binary
 ```
 
 Dev Postgres listens on host port **5433**, so it can run alongside BookLab's on 5432.
+
+### Scheduled jobs, public pages, settings
+
+- The server runs the §10 jobs itself every 5 minutes (and once at startup): requests closing at the cutoff, under-filled / needs-confirming DMs to kiln masters, missed-start and missed-unload reminders. Nothing external (cron) is needed.
+- `/upcoming` (the wheel QR) and `/calendar.ics` are public.
+- Admins edit studio settings and kilns on `/admin/settings`, and print the wheel and kiln QR codes from `/admin/qr`. Set `APP_BASE_URL` to the real address first, since the codes encode it.
 
 ## Setting up Discord and Slack
 

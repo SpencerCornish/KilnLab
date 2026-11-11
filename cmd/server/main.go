@@ -18,6 +18,7 @@ import (
 	"github.com/spencercornish/kilnlab/internal/auth"
 	"github.com/spencercornish/kilnlab/internal/config"
 	"github.com/spencercornish/kilnlab/internal/db"
+	"github.com/spencercornish/kilnlab/internal/jobs"
 	"github.com/spencercornish/kilnlab/internal/notify"
 	"github.com/spencercornish/kilnlab/internal/webembed"
 )
@@ -91,6 +92,10 @@ func main() {
 	worker := notify.NewWorker(pool, notifyCfg, logger, notify.WorkerOptions{})
 	srv.SetNotifier(worker)
 	go worker.Run(ctx)
+
+	// Scheduled jobs (spec §10): request cutoffs, kiln-master alerts, missed-scan reminders.
+	go jobs.NewRunner(pool, notifyCfg, worker, logger).Run(ctx)
+
 	httpSrv := &http.Server{
 		Addr:              srv.Addr(),
 		Handler:           srv.Handler(),

@@ -83,6 +83,7 @@ func (s *Server) Handler() http.Handler {
 		r.Use(s.csrfProtect)
 
 		r.Get("/health", s.handleHealth)
+		r.Get("/public/upcoming", s.handleUpcoming)
 
 		// Auth. start/callback are top-level browser navigations, not fetches.
 		r.Get("/auth/providers", s.handleAuthProviders)
@@ -102,6 +103,10 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/admin/users", s.handleListUsers)
 			r.Patch("/admin/users/{id}", s.handleUpdateUser)
 			r.Get("/admin/notifications", s.handleListOutbox)
+			r.Get("/admin/settings", s.handleGetSettings)
+			r.Put("/admin/settings", s.handleUpdateSettings)
+			r.Post("/admin/kilns", s.handleCreateKiln)
+			r.Put("/admin/kilns/{id}", s.handleUpdateKiln)
 
 			r.Get("/firings", s.handleListFirings)
 			r.Post("/firings", s.handleCreateFiring)
@@ -130,6 +135,7 @@ func (s *Server) Handler() http.Handler {
 		})
 	})
 
+	r.Get("/calendar.ics", s.handleCalendar)
 	r.Get("/*", s.handleSPA)
 	return r
 }

@@ -53,8 +53,9 @@ func (c Config) Channel(st db.Setting, p db.AuthProvider) string {
 // Batch collects what one change should send. The main channel message is
 // always refreshed; Thread and DMs are optional.
 type Batch struct {
-	Thread string // threaded reply under the main message
-	dms    []dmPayload
+	Thread      string // threaded reply under the main message
+	SkipChannel bool   // don't refresh the main message (alerts that change nothing visible)
+	dms         []dmPayload
 }
 
 // ThreadReply sets the threaded reply text.
@@ -80,9 +81,9 @@ type dmPayload struct {
 
 // Enqueue writes outbox rows for a change to firing firingID made by actorID.
 // Call it inside the change's transaction. The actor isn't DMed about their
-// own action. firingID 0 skips the channel message (e.g. pure alerts).
+// own action. firingID 0 or b.SkipChannel skips the channel message.
 func Enqueue(ctx context.Context, q *db.Queries, cfg Config, firingID, actorID int64, b *Batch) error {
-	if firingID != 0 {
+	if firingID != 0 && !b.SkipChannel {
 		st, err := q.GetSettings(ctx)
 		if err != nil {
 			return err

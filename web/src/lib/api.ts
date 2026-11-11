@@ -1,5 +1,10 @@
 import type {
+  AdminSettings,
   AdminUser,
+  Kiln,
+  KilnInput,
+  Settings,
+  Upcoming,
   AdvanceInput,
   AuthProviders,
   KilnView,
@@ -129,3 +134,22 @@ export const updateUser = (id: number, patch: { self_loader?: boolean; admin?: b
   request<void>(`/admin/users/${id}`, json('PATCH', patch))
 
 export const getNotificationLog = () => request<NotificationLog>('/admin/notifications')
+
+// ── Public (no login) ───────────────────────────────────────────────────────
+
+export const getUpcoming = () => request<Upcoming>('/public/upcoming')
+
+// ── Admin settings ──────────────────────────────────────────────────────────
+
+/** Settings changes invalidate the cached form options. */
+function freshOptions<T>(p: Promise<T>): Promise<T> {
+  return p.then((v) => {
+    optionsPromise = null
+    return v
+  })
+}
+
+export const getSettings = () => request<AdminSettings>('/admin/settings')
+export const updateSettings = (s: Settings) => freshOptions(request<AdminSettings>('/admin/settings', json('PUT', s)))
+export const createKiln = (k: KilnInput) => freshOptions(request<Kiln>('/admin/kilns', json('POST', k)))
+export const updateKiln = (id: number, k: KilnInput) => freshOptions(request<Kiln>(`/admin/kilns/${id}`, json('PUT', k)))

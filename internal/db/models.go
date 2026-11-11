@@ -501,6 +501,7 @@ type Firing struct {
 	MissedUnloadReminderSentAt *time.Time   `json:"missed_unload_reminder_sent_at"`
 	CreatedAt                  time.Time    `json:"created_at"`
 	UpdatedAt                  time.Time    `json:"updated_at"`
+	RequestsCloseHandledAt     *time.Time   `json:"requests_close_handled_at"`
 }
 
 type FiringEvent struct {

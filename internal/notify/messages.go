@@ -63,3 +63,30 @@ func DMOnHold(f db.Firing, loc *time.Location, reason, url string) string {
 func DMReady(f db.Firing, loc *time.Location, url string) string {
 	return fmt.Sprintf("✅ %s is ready for pickup!\n%s", Describe(f, loc), url)
 }
+
+// ── Kiln-master alerts (M4 jobs) ────────────────────────────────────────────
+
+func AlertUnderfilled(f db.Firing, loc *time.Location, pct int, unconfirmed bool, url string) string {
+	s := fmt.Sprintf("⚠️ %s is only %d%% full and requests are closed", Describe(f, loc), pct)
+	if unconfirmed {
+		s += " (not confirmed yet)"
+	}
+	return s + ".\nRun it anyway, postpone it, reopen requests or cancel:\n" + url
+}
+
+func AlertNeedsConfirmation(f db.Firing, loc *time.Location, pct int, url string) string {
+	return fmt.Sprintf("📝 Requests are closed for %s (~%d%% full) and it still needs confirming.\n%s",
+		Describe(f, loc), pct, url)
+}
+
+func AlertMissedStart(f db.Firing, loc *time.Location, url string) string {
+	return fmt.Sprintf("⏰ %s hasn't been marked started yet.\n%s", Describe(f, loc), url)
+}
+
+func AlertMissedUnload(f db.Firing, loc *time.Location, url string) string {
+	when := ""
+	if f.EstimatedUnloadAt != nil {
+		when = " (est. unload " + f.EstimatedUnloadAt.In(loc).Format(whenLayout) + ")"
+	}
+	return fmt.Sprintf("⏰ %s%s hasn't been marked unloaded yet.\n%s", Title(f), when, url)
+}

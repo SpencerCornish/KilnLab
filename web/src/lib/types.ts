@@ -255,3 +255,60 @@ export interface NotificationLog {
   slack: boolean
   items: OutboxItem[]
 }
+
+// ── Public page (§9A) ───────────────────────────────────────────────────────
+
+export interface PublicFiring {
+  id: number
+  kiln_name?: string
+  title: string | null
+  firing_type: string
+  cone: string
+  scheduled_start: string
+  status: FiringStatus
+  fullness_pct: number
+  room_left_pct: number
+  requests_close_at: string
+  requests_open: boolean
+  participant_count: number
+  started_at: string | null
+  estimated_unload_at: string | null
+}
+
+export interface Upcoming {
+  timezone: string
+  days_ahead: number
+  firings: PublicFiring[]
+}
+
+// ── Admin settings ──────────────────────────────────────────────────────────
+
+export interface Settings {
+  timezone: string
+  min_notice_hours: number
+  request_cutoff_hours: number
+  underfilled_threshold_pct: number
+  firing_types: string[]
+  cones: string[]
+  programs: Program[]
+  discord_channel_id: string
+  slack_channel_id: string
+  missed_start_grace_minutes: number
+  missed_unload_grace_minutes: number
+  public_page_days_ahead: number
+}
+
+export interface AdminSettings {
+  settings: Settings
+  kilns: Kiln[]
+  env: {
+    base_url: string
+    discord_bot: boolean
+    slack_bot: boolean
+    discord_channel_fallback: string
+    slack_channel_fallback: string
+    dry_run: boolean
+  }
+}
+
+export type KilnInput = Omit<Kiln, 'id'>

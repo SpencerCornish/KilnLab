@@ -17,3 +17,7 @@ const (
 	EventLoaderAssigned     = "loader_assigned"
 	EventTimestampCorrected = "timestamp_corrected"
 )
+
+// EventAlertSent records a kiln-master alert or reminder from the scheduled
+// jobs (source = system); the note says which.
+const EventAlertSent = "alert_sent"

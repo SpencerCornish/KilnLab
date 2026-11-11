@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     // Proxy the API (including OAuth callbacks) so cookies land on the Vite origin.
-    proxy: { '/api': 'http://localhost:8080' },
+    proxy: { '/api': 'http://localhost:8080', '/calendar.ics': 'http://localhost:8080' },
   },
   build: {
     outDir: '../internal/webembed/dist',

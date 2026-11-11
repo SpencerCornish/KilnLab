@@ -57,7 +57,7 @@ export default function HomePage() {
         </Link>
         {(me.roles.kiln_master || me.roles.admin) && (
           <Link to="/admin" className="btn col-span-2 border-2 border-stone-300 bg-white text-base">
-            Admin · people
+            Admin
           </Link>
         )}
       </div>

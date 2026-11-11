@@ -50,6 +50,7 @@ SET scheduled_start = sqlc.arg(scheduled_start),
     requests_close_at = sqlc.arg(requests_close_at),
     underfilled_alert_sent_at = NULL,
     missed_start_reminder_sent_at = NULL,
+    requests_close_handled_at = NULL,
     updated_at = now()
 WHERE id = sqlc.arg(id)
 RETURNING *;
@@ -60,9 +61,12 @@ WHERE id = sqlc.arg(id)
 RETURNING *;
 
 -- name: SetRequestsWindow :one
+-- Clears the close job's markers so the next close (manual or at the cutoff) is handled again.
 UPDATE firings
 SET requests_closed_manually = sqlc.arg(closed_manually),
     requests_close_at = sqlc.arg(requests_close_at),
+    requests_close_handled_at = NULL,
+    underfilled_alert_sent_at = NULL,
     updated_at = now()
 WHERE id = sqlc.arg(id)
 RETURNING *;

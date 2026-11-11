@@ -40,6 +40,11 @@ func openTestPool(t *testing.T) *pgxpool.Pool {
 	if _, err := pool.Exec(ctx, `DELETE FROM kilns WHERE id <> (SELECT min(id) FROM kilns)`); err != nil {
 		t.Fatalf("reset kilns: %v", err)
 	}
+	if _, err := pool.Exec(ctx, `UPDATE kilns SET name = 'Studio kiln', active = true, interior_width_in = NULL,
+		interior_depth_in = NULL, interior_height_in = NULL, shelf_count = NULL, share_per_shelf_pct = NULL;
+		DELETE FROM settings; INSERT INTO settings (id) VALUES (1)`); err != nil {
+		t.Fatalf("reset settings: %v", err)
+	}
 	return pool
 }
 

@@ -8,7 +8,7 @@ questions live in [DECISIONS.md](DECISIONS.md).
 
 Legend: ✅ done & tested · 🟡 partial · ⬜ not started · 🚫 blocked on owner
 
-_Last updated: 2026-11-11, end of M3 (code complete, awaiting owner check-in). M1 + M2 signed off and committed (`051a3ab`)._
+_Last updated: 2026-11-11, end of M4 (signed off). M3 committed as `c6a2634`. v1 is now code complete. What's left is owner-blocked (real OAuth apps, bots, staging, phone checks)._
 
 ---
 
@@ -19,8 +19,8 @@ _Last updated: 2026-11-11, end of M3 (code complete, awaiting owner check-in). M
 | M0 — Scaffold & auth | 🟡 code ✅, phone verification 🚫 | Done 2026-11-11 |
 | M1 — Firings & requests | ✅ | Signed off 2026-11-11. Built on the defaults for open questions 1–5; multi-kiln added (D24) |
 | M2 — Status lifecycle & kiln QR | ✅ | Signed off 2026-11-11. Phone check of `/kiln` still to do |
-| M3 — Notifications | ✅ code complete | **Check-in pending.** Tested against fake Discord/Slack servers + dry run; real bots need owner tokens + channel IDs |
-| M4 — Jobs, public page, calendar, admin settings | ⬜ next | |
+| M3 — Notifications | ✅ | Signed off 2026-11-11. Real bots still need owner tokens + channel IDs |
+| M4 — Jobs, public page, calendar, admin settings | ✅ | Signed off 2026-11-11 |
 | Stretch (§15) | ⬜ | Only after v1 and with owner's OK |
 
 The spec says to check in with the owner at the end of each milestone. Don't roll into the next one without that.
@@ -112,12 +112,17 @@ reschedule, cancel, close/reopen requests; unit tests for state machine, permiss
 
 | Item | Status | Notes |
 |---|:-:|---|
-| In-process scheduler (5-min tick) | ⬜ | Replaces `/api/cron/tick`, see D3 |
-| Jobs: close requests, under-filled alert, unconfirmed reminder, missed start, missed unload | ⬜ | Idempotent via `*_sent_at`; tested |
-| `/upcoming` public page (§9A) | ⬜ | Placeholder page exists |
-| `/calendar.ics` | ⬜ | Go-served, not SPA |
-| `/admin/settings` incl. kiln dimensions | ⬜ | |
-| End-to-end acceptance scenario (§14) | ⬜ | Consider Hurl/Playwright like BookLab |
+| In-process scheduler (5-min tick, plus once at startup) | ✅ | `internal/jobs` (`Runner`), started from `cmd/server`. One transaction per firing; one failure doesn't stop the others |
+| Jobs: close requests, under-filled alert, unconfirmed reminder, missed start, missed unload | ✅ | Pure `jobs.Due` + unit tests; idempotent via `*_sent_at` + new `requests_close_handled_at` (migration 003). D33–D37 |
+| Re-arming after reschedule / reopen | ✅ | Integration tested (`internal/api/jobs_integration_test.go`, incl. §14 step 9) |
+| Timeline shows system actions ("· automatic") | ✅ | `alert_sent` events, source `system` |
+| `/upcoming` public page (§9A) | ✅ | `GET /api/public/upcoming`, no names/notes (tested). "Request space" → login → request form opens (`/firings/:id?request=1`) |
+| `/calendar.ics` | ✅ | `internal/ical` (escaping, folding, tested). D39. Linked from `/upcoming` (webcal + copy link) |
+| `/admin/settings`: all settings, programs editor, channel IDs, bot status | ✅ | `GET/PUT /api/admin/settings`, validated (tested) |
+| Kilns: add / edit dimensions / deactivate | ✅ | `POST /api/admin/kilns`, `PUT /api/admin/kilns/{id}`; at least one stays active |
+| Printable QR codes (wheel + per kiln) | ✅ | `/admin/qr` (D41) |
+| **Phone check of `/upcoming`, `/admin/settings` and printed QR codes** | ⬜ | Needs staging for real QR scans |
+| End-to-end acceptance scenario (§14) as one automated test | ⬜ | Covered piecewise by the integration tests. A Hurl/Playwright run could follow after staging |
 
 ---
 

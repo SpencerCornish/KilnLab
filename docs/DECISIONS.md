@@ -40,6 +40,16 @@ default currently in use. When the owner answers a question, move it to Decision
 | D30 | 2026-11-11 | DMs go to the user's first account's platform; the actor is never DMed about their own action | §11 "platform they signed in with"; avoids self-notifications |
 | D31 | 2026-11-11 | Changing the channel in settings only affects firings without a message yet | Keeps edit-in-place simple |
 | D32 | 2026-11-11 | `NOTIFICATIONS_DRY_RUN` logs rendered messages instead of sending | Develop/demo notifications without bot tokens |
+| D33 | 2026-11-11 | **One "requests closed" job per cutoff**, tracked by new `firings.requests_close_handled_at` (migration 003). It refreshes the channel message and sends kiln masters one DM: under-filled (below the threshold) takes priority, otherwise "needs confirming" if still proposed/on hold | §10 lets the unconfirmed reminder ride along with the under-filled alert; one DM instead of two |
+| D34 | 2026-11-11 | Reschedule and reopen/close requests clear the close marker (and the under-filled marker), so the job runs again for the new cutoff. A manual close counts as a close | Matches "requests just closed" whichever way they closed |
+| D35 | 2026-11-11 | A firing created after its own cutoff (kiln master, short notice) closes quietly: no alert DMs | It was never open for requests; alerting its creator is noise |
+| D36 | 2026-11-11 | Missed-start reminders go to kiln masters; missed-unload reminders go to kiln masters **plus the assigned loader**. Reminders don't touch the channel message | §10 table |
+| D37 | 2026-11-11 | Migration 003 marks firings that are already past their cutoff or overdue as handled | Avoids a burst of stale alerts on the first tick after deploying |
+| D38 | 2026-11-11 | `/upcoming` shows proposed/on hold/confirmed firings for the next `public_page_days_ahead` days, plus anything in the kiln. It refreshes every minute. "On hold" is shown as "Waiting for more work" | §9A; wheel-side screen |
+| D39 | 2026-11-11 | `/calendar.ics` covers the last 30 days to `public_page_days_ahead` ahead, excluding cancelled firings. Events run from the start to the unload time when one is known (actual → estimated → start + program duration), otherwise they're a 1-hour marker. Proposed/on hold firings are `TENTATIVE` | Firings that haven't happened don't fill a day in people's calendars |
+| D40 | 2026-11-11 | A change to the request cutoff applies to firings proposed or rescheduled afterwards (`requests_close_at` is stored per firing) | Firings people already planned around don't shift |
+| D41 | 2026-11-11 | Printable QR codes on `/admin/qr`, drawn in the browser with `uqr`, using `APP_BASE_URL`. With more than one active kiln, each kiln QR is `/kiln?k=<id>` | No server QR dependency; warns when the base URL is localhost |
+| D42 | 2026-11-11 | At least one kiln must stay active | New firings need a kiln (`pickKiln`) |
 | D23 | 2026-11-11 | Datetimes are entered and shown in `settings.timezone`, not the phone's timezone. Binary embeds `time/tzdata` | Everyone sees studio wall time |
 
 ---

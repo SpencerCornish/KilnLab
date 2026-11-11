@@ -18,7 +18,12 @@ export function AdminIndexPage() {
       </Link>
       {me.roles.admin && (
         <>
-          <div className="card text-stone-600">Studio settings (kilns, cones, programs, channels) are coming soon.</div>
+          <Link to="/admin/settings" className="btn bg-stone-900 text-white">
+            Studio settings &amp; kilns
+          </Link>
+          <Link to="/admin/qr" className="btn border-2 border-stone-900 bg-white">
+            Printable QR codes
+          </Link>
           <NotificationLogSection />
         </>
       )}

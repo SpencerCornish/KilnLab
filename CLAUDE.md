@@ -10,7 +10,7 @@ Read before starting work:
 
 ## Working rules
 - Work milestone by milestone (M0–M4). Check in with the owner at the end of each one.
-- Keep the core logic pure and unit tested: role predicates in `internal/policy`; state machine, requests window, fullness and compatibility in `internal/firing`; jobs (M4).
+- Keep the core logic pure and unit tested: role predicates in `internal/policy`; state machine, requests window, fullness and compatibility in `internal/firing`; job conditions in `internal/jobs` (`Due`).
 - Permissions are enforced on the server. Only kiln masters can start the kiln.
 - Notification failures must never block a state change; all sends go through `notification_outbox`.
 - Use current dependency versions (look them up); don't copy BookLab's pins.

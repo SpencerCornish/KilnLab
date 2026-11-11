@@ -1,5 +1,5 @@
-import { useState, type FormEvent, type ReactNode } from 'react'
-import { Link, useParams } from 'react-router'
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { Link, useParams, useSearchParams } from 'react-router'
 import {
   Alert,
   ConeSelect,
@@ -44,6 +44,16 @@ export default function FiringPage() {
   const [warnings, setWarnings] = useState<string[]>([])
   const [actionError, setActionError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+
+  // "Request space" on the public page links here with ?request=1 (after login).
+  const [params, setParams] = useSearchParams()
+  const wantsRequest = params.has('request')
+  const detailLoaded = data?.[0]
+  useEffect(() => {
+    if (!wantsRequest || !detailLoaded) return
+    if (detailLoaded.can.request && !detailLoaded.my_request) setSheet({ kind: 'request' })
+    setParams({}, { replace: true })
+  }, [wantsRequest, detailLoaded, setParams])
 
   if (error) {
     return (
@@ -702,7 +712,7 @@ function describe(e: FiringEvent): string {
     case 'status_change':
       return `${e.from_status ? STATUS_LABELS[e.from_status] : '?'} → ${e.to_status ? STATUS_LABELS[e.to_status] : '?'}`
     case 'requests_closed':
-      return 'Closed requests'
+      return e.source === 'system' ? 'Requests closed' : 'Closed requests'
     case 'requests_reopened':
       return 'Reopened requests'
     default:
@@ -725,6 +735,7 @@ function Timeline({ events, tz }: { events: FiringEvent[]; tz: string }) {
                 {formatWhen(e.occurred_at, tz)}
                 {e.actor && ` · ${e.actor.name}`}
                 {e.source === 'kiln_qr' && ' · kiln QR'}
+                {e.source === 'system' && ' · automatic'}
               </p>
               {what && <p className="font-medium">{what}</p>}
               {e.note && <p className={what ? 'text-stone-600' : 'font-medium'}>{e.note}</p>}

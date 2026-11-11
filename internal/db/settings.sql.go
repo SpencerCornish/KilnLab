@@ -7,7 +7,61 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 )
+
+const countActiveKilns = `-- name: CountActiveKilns :one
+SELECT count(*)::int FROM kilns WHERE active
+`
+
+func (q *Queries) CountActiveKilns(ctx context.Context) (int32, error) {
+	row := q.db.QueryRow(ctx, countActiveKilns)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const createKiln = `-- name: CreateKiln :one
+INSERT INTO kilns (name, interior_width_in, interior_depth_in, interior_height_in, shelf_count, share_per_shelf_pct, active)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, name, interior_width_in, interior_depth_in, interior_height_in, shelf_count, share_per_shelf_pct, active, created_at, updated_at
+`
+
+type CreateKilnParams struct {
+	Name             string   `json:"name"`
+	InteriorWidthIn  *float64 `json:"interior_width_in"`
+	InteriorDepthIn  *float64 `json:"interior_depth_in"`
+	InteriorHeightIn *float64 `json:"interior_height_in"`
+	ShelfCount       *int32   `json:"shelf_count"`
+	SharePerShelfPct *int32   `json:"share_per_shelf_pct"`
+	Active           bool     `json:"active"`
+}
+
+func (q *Queries) CreateKiln(ctx context.Context, arg CreateKilnParams) (Kiln, error) {
+	row := q.db.QueryRow(ctx, createKiln,
+		arg.Name,
+		arg.InteriorWidthIn,
+		arg.InteriorDepthIn,
+		arg.InteriorHeightIn,
+		arg.ShelfCount,
+		arg.SharePerShelfPct,
+		arg.Active,
+	)
+	var i Kiln
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.InteriorWidthIn,
+		&i.InteriorDepthIn,
+		&i.InteriorHeightIn,
+		&i.ShelfCount,
+		&i.SharePerShelfPct,
+		&i.Active,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
 
 const getKiln = `-- name: GetKiln :one
 SELECT id, name, interior_width_in, interior_depth_in, interior_height_in, shelf_count, share_per_shelf_pct, active, created_at, updated_at FROM kilns WHERE id = $1
@@ -91,4 +145,125 @@ func (q *Queries) ListKilns(ctx context.Context) ([]Kiln, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateKiln = `-- name: UpdateKiln :one
+UPDATE kilns
+SET name = $1,
+    interior_width_in = $2,
+    interior_depth_in = $3,
+    interior_height_in = $4,
+    shelf_count = $5,
+    share_per_shelf_pct = $6,
+    active = $7,
+    updated_at = now()
+WHERE id = $8
+RETURNING id, name, interior_width_in, interior_depth_in, interior_height_in, shelf_count, share_per_shelf_pct, active, created_at, updated_at
+`
+
+type UpdateKilnParams struct {
+	Name             string   `json:"name"`
+	InteriorWidthIn  *float64 `json:"interior_width_in"`
+	InteriorDepthIn  *float64 `json:"interior_depth_in"`
+	InteriorHeightIn *float64 `json:"interior_height_in"`
+	ShelfCount       *int32   `json:"shelf_count"`
+	SharePerShelfPct *int32   `json:"share_per_shelf_pct"`
+	Active           bool     `json:"active"`
+	ID               int64    `json:"id"`
+}
+
+func (q *Queries) UpdateKiln(ctx context.Context, arg UpdateKilnParams) (Kiln, error) {
+	row := q.db.QueryRow(ctx, updateKiln,
+		arg.Name,
+		arg.InteriorWidthIn,
+		arg.InteriorDepthIn,
+		arg.InteriorHeightIn,
+		arg.ShelfCount,
+		arg.SharePerShelfPct,
+		arg.Active,
+		arg.ID,
+	)
+	var i Kiln
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.InteriorWidthIn,
+		&i.InteriorDepthIn,
+		&i.InteriorHeightIn,
+		&i.ShelfCount,
+		&i.SharePerShelfPct,
+		&i.Active,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateSettings = `-- name: UpdateSettings :one
+UPDATE settings
+SET timezone = $1,
+    min_notice_hours = $2,
+    request_cutoff_hours = $3,
+    underfilled_threshold_pct = $4,
+    firing_types = $5,
+    cones = $6,
+    programs = $7,
+    discord_channel_id = $8,
+    slack_channel_id = $9,
+    missed_start_grace_minutes = $10,
+    missed_unload_grace_minutes = $11,
+    public_page_days_ahead = $12,
+    updated_at = now()
+WHERE id = 1
+RETURNING id, timezone, min_notice_hours, request_cutoff_hours, underfilled_threshold_pct, firing_types, cones, programs, discord_channel_id, slack_channel_id, missed_start_grace_minutes, missed_unload_grace_minutes, public_page_days_ahead, updated_at
+`
+
+type UpdateSettingsParams struct {
+	Timezone                 string          `json:"timezone"`
+	MinNoticeHours           int32           `json:"min_notice_hours"`
+	RequestCutoffHours       int32           `json:"request_cutoff_hours"`
+	UnderfilledThresholdPct  int32           `json:"underfilled_threshold_pct"`
+	FiringTypes              []string        `json:"firing_types"`
+	Cones                    []string        `json:"cones"`
+	Programs                 json.RawMessage `json:"programs"`
+	DiscordChannelID         string          `json:"discord_channel_id"`
+	SlackChannelID           string          `json:"slack_channel_id"`
+	MissedStartGraceMinutes  int32           `json:"missed_start_grace_minutes"`
+	MissedUnloadGraceMinutes int32           `json:"missed_unload_grace_minutes"`
+	PublicPageDaysAhead      int32           `json:"public_page_days_ahead"`
+}
+
+func (q *Queries) UpdateSettings(ctx context.Context, arg UpdateSettingsParams) (Setting, error) {
+	row := q.db.QueryRow(ctx, updateSettings,
+		arg.Timezone,
+		arg.MinNoticeHours,
+		arg.RequestCutoffHours,
+		arg.UnderfilledThresholdPct,
+		arg.FiringTypes,
+		arg.Cones,
+		arg.Programs,
+		arg.DiscordChannelID,
+		arg.SlackChannelID,
+		arg.MissedStartGraceMinutes,
+		arg.MissedUnloadGraceMinutes,
+		arg.PublicPageDaysAhead,
+	)
+	var i Setting
+	err := row.Scan(
+		&i.ID,
+		&i.Timezone,
+		&i.MinNoticeHours,
+		&i.RequestCutoffHours,
+		&i.UnderfilledThresholdPct,
+		&i.FiringTypes,
+		&i.Cones,
+		&i.Programs,
+		&i.DiscordChannelID,
+		&i.SlackChannelID,
+		&i.MissedStartGraceMinutes,
+		&i.MissedUnloadGraceMinutes,
+		&i.PublicPageDaysAhead,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
