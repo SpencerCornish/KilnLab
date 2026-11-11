@@ -1,0 +1,33 @@
+services:
+  db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
+    environment:
+      POSTGRES_DB: kilnlab
+      POSTGRES_USER: kilnlab
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kilnlab}
+    volumes:
+      - pgdata:/var/lib/postgresql
+      - ./scripts/create-test-db.sql:/docker-entrypoint-initdb.d/create-test-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kilnlab"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://kilnlab:${POSTGRES_PASSWORD:-kilnlab}@db:5432/kilnlab?sslmode=disable
+
+volumes:
+  pgdata:

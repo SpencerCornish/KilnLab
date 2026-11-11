@@ -1,0 +1,7 @@
+.git
+**/node_modules
+internal/webembed/dist
+.env
+web/.env
+data/
+kilnlab

@@ -1,0 +1,29 @@
+# Production: Postgres + KilnLab. Put a TLS reverse proxy in front (see docs/deployment.md).
+services:
+  db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: kilnlab
+      POSTGRES_USER: kilnlab
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - ${POSTGRES_DATA_PATH:-./data/postgres}:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kilnlab"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${APP_PUBLISH_PORT:-8080}:8080"
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://kilnlab:${POSTGRES_PASSWORD}@db:5432/kilnlab?sslmode=disable
+      DEV_LOGIN: "false"

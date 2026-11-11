@@ -1,0 +1,19 @@
+DROP TABLE IF EXISTS notification_outbox;
+DROP TABLE IF EXISTS notification_messages;
+DROP TABLE IF EXISTS firing_events;
+DROP TABLE IF EXISTS firing_requests;
+DROP TABLE IF EXISTS firings;
+DROP TABLE IF EXISTS settings;
+DROP TABLE IF EXISTS kilns;
+DROP TABLE IF EXISTS oauth_states;
+DROP TABLE IF EXISTS sessions;
+DROP TABLE IF EXISTS accounts;
+DROP TABLE IF EXISTS users;
+
+DROP TYPE IF EXISTS outbox_status;
+DROP TYPE IF EXISTS outbox_kind;
+DROP TYPE IF EXISTS event_source;
+DROP TYPE IF EXISTS request_status;
+DROP TYPE IF EXISTS firing_status;
+DROP TYPE IF EXISTS auth_provider;
+DROP TYPE IF EXISTS community;

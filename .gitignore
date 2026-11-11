@@ -1,0 +1,12 @@
+.env
+web/.env
+web/node_modules/
+/kilnlab
+*.log
+.DS_Store
+tmp/
+data/
+
+# Embed needs at least one file under dist/ when the SPA hasn't been built.
+internal/webembed/dist/*
+!internal/webembed/dist/placeholder.txt
