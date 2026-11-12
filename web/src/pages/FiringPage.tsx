@@ -13,14 +13,13 @@ import {
   STATUS_LABELS,
   StatusBadge,
 } from '../components/firing'
-import { firingActions as act, getFiring, getOptions, listLoaders } from '../lib/api'
+import { firingActions as act, getFiring, getOptions } from '../lib/api'
 import { PageSpinner } from '../lib/session'
-import { formatWhen, fromInputValue, relative, toInputValue } from '../lib/time'
+import { formatDate, formatWhen, relative } from '../lib/time'
 import type {
   FiringDetail,
   FiringEvent,
   FiringRequest,
-  LoaderCandidate,
   MutationResult,
   Options,
   RequestInput,
@@ -34,7 +33,7 @@ type SheetKind =
   | { kind: 'edit'; request: FiringRequest }
   | { kind: 'decide'; request: FiringRequest; decision: 'approve' | 'decline' }
   | { kind: 'withdraw'; request: FiringRequest }
-  | { kind: 'hold' | 'release' | 'reschedule' | 'cancel' | 'fullness' | 'loader' }
+  | { kind: 'hold' | 'release' | 'reschedule' | 'cancel' | 'fullness' }
   | { kind: 'correct'; field: TimestampField }
 
 export default function FiringPage() {
@@ -104,11 +103,10 @@ export default function FiringPage() {
           <h1 className="text-2xl font-bold">{firingTitle(f)}</h1>
           <StatusBadge status={f.status} />
         </div>
-        <p className="text-lg">{formatWhen(f.scheduled_start, tz)}</p>
+        <p className="text-lg">{formatDate(f.scheduled_date)}</p>
         <p className="text-stone-600">
           <span className="capitalize">{f.firing_type}</span> · Cone {f.cone}
           {kilnLabel(options, f.kiln_id) && ` · ${kilnLabel(options, f.kiln_id)}`} · proposed by {f.proposer.name}
-          {detail.loader && <> · loader: {detail.loader.name}</>}
         </p>
       </section>
 
@@ -218,7 +216,6 @@ export default function FiringPage() {
                 {f.requests_open ? 'Close requests' : 'Reopen requests'}
               </KmButton>
             )}
-            {can.manage && <KmButton onClick={() => setSheet({ kind: 'loader' })}>Assign loader</KmButton>}
             {can.cancel && (
               <button onClick={() => setSheet({ kind: 'cancel' })} className="btn border-2 border-red-300 bg-white text-base text-red-700">
                 Cancel firing
@@ -506,28 +503,26 @@ function ActionSheets({
     case 'reschedule':
       title = 'Reschedule'
       body = (
-        <DateForm
-          initial={toInputValue(f.scheduled_start, tz)}
-          tz={tz}
+        <DayForm
+          initial={f.scheduled_date}
           busy={busy}
           withNote
           submitLabel="Reschedule"
-          onSubmit={(iso, note) => iso && run(() => act.reschedule(f.id, iso, note))}
+          onSubmit={(day, note) => run(() => act.reschedule(f.id, day, note))}
         />
       )
       break
     case 'release':
       title = 'Release hold'
       body = (
-        <DateForm
-          initial={toInputValue(f.scheduled_start, tz)}
-          tz={tz}
+        <DayForm
+          initial={f.scheduled_date}
           busy={busy}
           submitLabel="Release"
-          onSubmit={(iso) => run(() => act.release(f.id, iso))}
+          onSubmit={(day) => run(() => act.release(f.id, day))}
         >
-          <p className="text-stone-600">Change the start time if needed.</p>
-        </DateForm>
+          <p className="text-stone-600">Change the day if needed.</p>
+        </DayForm>
       )
       break
     case 'fullness':
@@ -545,10 +540,6 @@ function ActionSheets({
           onSubmit={(iso) => run(() => act.correctTimestamp(f.id, sheet.field, iso))}
         />
       )
-      break
-    case 'loader':
-      title = 'Assign loader'
-      body = <LoaderForm current={f.loader_user_id} busy={busy} onSubmit={(uid) => run(() => act.setLoader(f.id, uid))} />
       break
   }
 
@@ -608,10 +599,9 @@ function ReasonForm({
   )
 }
 
-function DateForm({
+function DayForm({
   children,
   initial,
-  tz,
   busy,
   withNote,
   submitLabel,
@@ -619,11 +609,10 @@ function DateForm({
 }: {
   children?: ReactNode
   initial: string
-  tz: string
   busy: boolean
   withNote?: boolean
   submitLabel: string
-  onSubmit: (iso: string | null, note: string | null) => void
+  onSubmit: (day: string, note: string | null) => void
 }) {
   const [value, setValue] = useState(initial)
   const [note, setNote] = useState('')
@@ -632,12 +621,19 @@ function DateForm({
       className="space-y-4"
       onSubmit={(e) => {
         e.preventDefault()
-        onSubmit(fromInputValue(value, tz), note.trim() || null)
+        onSubmit(value, note.trim() || null)
       }}
     >
       {children}
-      <Field label="Start" hint={<p className="mt-1 text-sm text-stone-500">{tz.replace('_', ' ')} time. Requests close moves with it.</p>}>
-        <input type="datetime-local" required value={value} onChange={(e) => setValue(e.target.value)} className={inputClass} />
+      <Field
+        label="Day"
+        hint={
+          <p className="mt-1 text-sm text-stone-500">
+            Firings are booked for a day; no start time is promised. Requests close moves with the day.
+          </p>
+        }
+      >
+        <input type="date" required value={value} onChange={(e) => setValue(e.target.value)} className={inputClass} />
       </Field>
       {withNote && (
         <Field label="Note (optional)">
@@ -670,33 +666,6 @@ function FullnessForm({ detail, busy, onSubmit }: { detail: FiringDetail; busy: 
       {full.overridden && (
         <button disabled={busy} onClick={() => onSubmit(null)} className="btn border-2 border-stone-300 bg-white text-base">
           Use calculated ({Math.min(full.calculated_pct, 100)}%)
-        </button>
-      )}
-    </div>
-  )
-}
-
-function LoaderForm({ current, busy, onSubmit }: { current: number | null; busy: boolean; onSubmit: (id: number | null) => void }) {
-  const { data, error } = useLoad(listLoaders, [])
-  if (error) return <Alert kind="error">{error}</Alert>
-  if (!data) return <PageSpinner />
-  return (
-    <div className="space-y-2">
-      {data.map((c: LoaderCandidate) => (
-        <button
-          key={c.id}
-          disabled={busy}
-          onClick={() => onSubmit(c.id)}
-          className={`btn justify-between border-2 text-base ${c.id === current ? 'border-orange-600 bg-orange-50' : 'border-stone-300 bg-white'}`}
-        >
-          <span>{c.name}</span>
-          <span className="text-sm font-normal text-stone-500">{c.is_kiln_master ? 'Kiln master' : 'Self-loader'}</span>
-        </button>
-      ))}
-      {data.length === 0 && <p className="text-stone-600">No self-loaders or kiln masters yet.</p>}
-      {current !== null && (
-        <button disabled={busy} onClick={() => onSubmit(null)} className="btn text-base text-stone-600">
-          Unassign
         </button>
       )}
     </div>

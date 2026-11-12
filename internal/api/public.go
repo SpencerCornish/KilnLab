@@ -23,7 +23,7 @@ type publicFiringDTO struct {
 	Title             *string         `json:"title"`
 	FiringType        string          `json:"firing_type"`
 	Cone              string          `json:"cone"`
-	ScheduledStart    time.Time       `json:"scheduled_start"`
+	ScheduledDate     Day             `json:"scheduled_date"`
 	Status            db.FiringStatus `json:"status"`
 	FullnessPct       int             `json:"fullness_pct"`
 	RoomLeftPct       int             `json:"room_left_pct"`
@@ -42,8 +42,7 @@ type upcomingDTO struct {
 
 var (
 	upcomingStatuses = []string{"proposed", "on_hold", "confirmed", "loading", "loaded", "firing", "cooling"}
-	calendarStatuses = []string{"proposed", "on_hold", "confirmed", "loading", "loaded", "firing", "cooling",
-		"unloaded", "ready_for_pickup", "completed"}
+	calendarStatuses = []string{"proposed", "on_hold", "confirmed", "loading", "loaded", "firing", "cooling", "completed"}
 )
 
 // upcomingGrace keeps a not-yet-started firing listed a while after its start time.
@@ -76,9 +75,10 @@ func (s *Server) handleUpcoming(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := s.now()
+	loc := s.studioLocation(ctx, s.queries)
 	rows, err := s.queries.ListPublicFirings(ctx, db.ListPublicFiringsParams{
-		Statuses: upcomingStatuses, Since: now.Add(-upcomingGrace),
-		Until: now.AddDate(0, 0, int(st.PublicPageDaysAhead)),
+		Statuses: upcomingStatuses, Since: firing.DayOf(now.Add(-upcomingGrace), loc),
+		Until: firing.DayOf(now.AddDate(0, 0, int(st.PublicPageDaysAhead)), loc),
 	})
 	if err != nil {
 		s.fail(w, r, err)
@@ -95,7 +95,7 @@ func (s *Server) handleUpcoming(w http.ResponseWriter, r *http.Request) {
 		full := firing.ComputeFullness(f.ProposerSharePct, []int32{row.ApprovedSharePct}, f.FullnessOverridePct)
 		out.Firings = append(out.Firings, publicFiringDTO{
 			ID: f.ID, KilnName: names[f.KilnID], Title: f.Title, FiringType: f.FiringType, Cone: f.Cone,
-			ScheduledStart: f.ScheduledStart, Status: f.Status, FullnessPct: full.Display, RoomLeftPct: full.RoomLeft,
+			ScheduledDate: Day(f.ScheduledDate), Status: f.Status, FullnessPct: full.Display, RoomLeftPct: full.RoomLeft,
 			RequestsCloseAt: f.RequestsCloseAt, RequestsOpen: firing.RequestsOpen(window(f), now),
 			ParticipantCount: int(row.ApprovedCount) + 1, StartedAt: f.StartedAt, EstimatedUnloadAt: f.EstimatedUnloadAt,
 		})
@@ -111,18 +111,22 @@ const calendarPast = 30 * 24 * time.Hour
 // unload time is known (actual, then estimated, then start + program
 // duration); otherwise it's a one-hour marker at the scheduled start.
 func calendarEvent(f db.Firing, full firing.Fullness, kiln, baseURL, host string, loc *time.Location) ical.Event {
-	start := f.ScheduledStart
-	if f.StartedAt != nil {
+	// Until it has started, a firing is only booked for its day: an all-day event.
+	var start, end time.Time
+	allDay := f.StartedAt == nil
+	if allDay {
+		start, end = f.ScheduledDate, f.ScheduledDate.AddDate(0, 0, 1)
+	} else {
 		start = *f.StartedAt
-	}
-	end := start.Add(time.Hour)
-	switch {
-	case f.UnloadedAt != nil && f.UnloadedAt.After(start):
-		end = *f.UnloadedAt
-	case f.EstimatedUnloadAt != nil && f.EstimatedUnloadAt.After(start):
-		end = *f.EstimatedUnloadAt
-	case f.EstimatedDurationMinutes != nil && *f.EstimatedDurationMinutes > 0:
-		end = start.Add(time.Duration(*f.EstimatedDurationMinutes) * time.Minute)
+		end = start.Add(time.Hour)
+		switch {
+		case f.UnloadedAt != nil && f.UnloadedAt.After(start):
+			end = *f.UnloadedAt
+		case f.EstimatedUnloadAt != nil && f.EstimatedUnloadAt.After(start):
+			end = *f.EstimatedUnloadAt
+		case f.EstimatedDurationMinutes != nil && *f.EstimatedDurationMinutes > 0:
+			end = start.Add(time.Duration(*f.EstimatedDurationMinutes) * time.Minute)
+		}
 	}
 	link := notify.FiringURL(baseURL, f.ID)
 	label := firing.Label(f.Status)
@@ -135,7 +139,7 @@ func calendarEvent(f db.Firing, full firing.Fullness, kiln, baseURL, host string
 	return ical.Event{
 		UID:         ical.UID("firing", f.ID, host),
 		Summary:     fmt.Sprintf("%s (%d%% full)", notify.Title(f), full.Display),
-		Description: desc, URL: link, Location: kiln, Start: start, End: end, Modified: f.UpdatedAt,
+		Description: desc, URL: link, Location: kiln, Start: start, End: end, AllDay: allDay, Modified: f.UpdatedAt,
 		Tentative: f.Status == firing.Proposed || f.Status == firing.OnHold,
 	}
 }
@@ -152,9 +156,10 @@ func (s *Server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := s.now()
+	loc := s.studioLocation(ctx, s.queries)
 	rows, err := s.queries.ListPublicFirings(ctx, db.ListPublicFiringsParams{
-		Statuses: calendarStatuses, Since: now.Add(-calendarPast),
-		Until: now.AddDate(0, 0, int(st.PublicPageDaysAhead)),
+		Statuses: calendarStatuses, Since: firing.DayOf(now.Add(-calendarPast), loc),
+		Until: firing.DayOf(now.AddDate(0, 0, int(st.PublicPageDaysAhead)), loc),
 	})
 	if err != nil {
 		s.fail(w, r, err)
@@ -169,7 +174,6 @@ func (s *Server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 	if u, err := url.Parse(s.cfg.AppBaseURL); err == nil && u.Hostname() != "" {
 		host = u.Hostname()
 	}
-	loc := s.studioLocation(ctx, s.queries)
 	cal := ical.Calendar{Name: "Kiln firings"}
 	for _, row := range rows {
 		f := row.Firing

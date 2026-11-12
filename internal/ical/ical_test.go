@@ -52,3 +52,23 @@ func TestFold(t *testing.T) {
 		t.Error("short lines unchanged")
 	}
 }
+
+func TestWriteAllDay(t *testing.T) {
+	day := time.Date(2026, 11, 20, 0, 0, 0, 0, time.UTC)
+	var b strings.Builder
+	if err := Write(&b, Calendar{Events: []Event{{
+		UID: UID("firing", 8, "kiln.example"), Summary: "Glaze (60% full)",
+		Start: day, End: day.AddDate(0, 0, 1), AllDay: true, Modified: day, Tentative: true,
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	for _, want := range []string{"DTSTART;VALUE=DATE:20261120\r\n", "DTEND;VALUE=DATE:20261121\r\n"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "DTSTART:") {
+		t.Error("all-day event written with a time")
+	}
+}

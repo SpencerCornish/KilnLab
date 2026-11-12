@@ -1,7 +1,6 @@
 export type Community = 'artlab' | 'bms'
 
 export interface Roles {
-  self_loader: boolean
   kiln_master: boolean
   admin: boolean
 }
@@ -30,8 +29,6 @@ export type FiringStatus =
   | 'loaded'
   | 'firing'
   | 'cooling'
-  | 'unloaded'
-  | 'ready_for_pickup'
   | 'completed'
   | 'cancelled'
 
@@ -56,7 +53,8 @@ export interface Firing {
   firing_type: string
   cone: string
   notes: string
-  scheduled_start: string
+  /** YYYY-MM-DD: the day it's booked for. No start time is promised. */
+  scheduled_date: string
   status: FiringStatus
   hold_reason: string | null
   cancel_reason: string | null
@@ -69,7 +67,6 @@ export interface Firing {
   requests_close_at: string
   requests_closed_manually: boolean
   requests_open: boolean
-  loader_user_id: number | null
   program: string | null
   estimated_duration_minutes: number | null
   started_at: string | null
@@ -81,7 +78,7 @@ export interface Firing {
   created_at: string
 }
 
-export type TimestampField = 'started_at' | 'cooling_at' | 'unloaded_at' | 'ready_for_pickup_at' | 'completed_at'
+export type TimestampField = 'started_at' | 'cooling_at' | 'unloaded_at'
 
 export interface FiringSummary extends Firing {
   approved_count: number
@@ -134,7 +131,6 @@ export interface FiringPerms {
 
 export interface FiringDetail {
   firing: Firing
-  loader: UserRef | null
   requests: FiringRequest[]
   my_request: FiringRequest | null
   events: FiringEvent[]
@@ -178,7 +174,8 @@ export interface KilnFiring {
   title: string | null
   firing_type: string
   cone: string
-  scheduled_start: string
+  /** YYYY-MM-DD: the day it's booked for. No start time is promised. */
+  scheduled_date: string
   status: FiringStatus
   proposer_name: string
 }
@@ -203,17 +200,9 @@ export interface AdminUser {
   avatar_url: string | null
   community: Community
   provider: 'discord' | 'slack'
-  is_self_loader: boolean
   is_kiln_master: boolean
   is_admin: boolean
   last_login_at: string
-}
-
-export interface LoaderCandidate {
-  id: number
-  name: string
-  is_kiln_master: boolean
-  is_self_loader: boolean
 }
 
 export interface NewFiring {
@@ -222,7 +211,8 @@ export interface NewFiring {
   cone: string
   title: string | null
   notes: string
-  scheduled_start: string
+  /** YYYY-MM-DD: the day it's booked for. No start time is promised. */
+  scheduled_date: string
   description: string
   share_pct: number
   proposer_cone: string
@@ -264,7 +254,8 @@ export interface PublicFiring {
   title: string | null
   firing_type: string
   cone: string
-  scheduled_start: string
+  /** YYYY-MM-DD: the day it's booked for. No start time is promised. */
+  scheduled_date: string
   status: FiringStatus
   fullness_pct: number
   room_left_pct: number

@@ -18,12 +18,12 @@ func parseTime(t *testing.T, v any) time.Time {
 
 func TestLifecycleAndKilnFlow(t *testing.T) {
 	e := newFiringEnv(t)
-	km := e.login("Kim", true, false)
-	sam := e.login("Sam", false, true) // self-loader
-	mo := e.login("Mo", false, false)
+	km := e.login("Kim", true)
+	sam := e.login("Sam", false)
+	mo := e.login("Mo", false)
 
 	d := km.mustDo("POST", "/api/firings", map[string]any{"firing_type": "glaze", "cone": "6",
-		"scheduled_start": e.now.Add(2 * time.Hour), "description": "mugs", "share_pct": 50}, http.StatusCreated)
+		"scheduled_date": dayOf(e.now.Add(2 * time.Hour)), "description": "mugs", "share_pct": 50}, http.StatusCreated)
 	id := int64(jget(d, "firing", "id").(float64))
 	base := fmt.Sprintf("/api/firings/%d", id)
 	status := func(c *apiClient, body map[string]any, want int) map[string]any {
@@ -44,16 +44,12 @@ func TestLifecycleAndKilnFlow(t *testing.T) {
 	}
 	mo.mustDo("GET", "/api/kiln?k=999999", nil, http.StatusNotFound)
 
-	// Unassigned members/self-loaders can't touch it; the assigned loader can.
-	status(sam, map[string]any{"to": "loading"}, http.StatusForbidden)
-	samID := jget(sam.mustDo("GET", "/api/me", nil, http.StatusOK), "id")
-	km.mustDo("PUT", base+"/loader", map[string]any{"user_id": samID}, http.StatusOK)
+	// Anyone signed in can say they've loaded their work, so no assignment is needed.
 	d = sam.mustDo("GET", base, nil, http.StatusOK)
 	if steps := jget(d, "can", "next_steps").([]any); len(steps) != 1 || steps[0] != "loading" {
 		t.Fatalf("sam's next steps = %v", steps)
 	}
-	status(mo, map[string]any{"to": "loading"}, http.StatusForbidden)
-	status(sam, map[string]any{"to": "loading", "source": "kiln_qr"}, http.StatusOK)
+	status(mo, map[string]any{"to": "loading", "source": "kiln_qr"}, http.StatusOK)
 	d = status(sam, map[string]any{"to": "loaded", "note": "top shelf has the tall vase"}, http.StatusOK)
 	if jget(d, "can", "blocked_reason") != "Only kiln masters can start the kiln." {
 		t.Fatalf("blocked reason = %v", jget(d, "can"))
@@ -75,9 +71,9 @@ func TestLifecycleAndKilnFlow(t *testing.T) {
 		t.Fatalf("started firing = %v", f)
 	}
 
-	// Self-loaders can't back-date; a time near "now" is accepted as now.
+	// Members can't back-date; a time near "now" is accepted as now.
 	e.advance(9 * time.Hour)
-	status(sam, map[string]any{"to": "unloaded", "occurred_at": e.now.Add(-time.Hour)}, http.StatusForbidden)
+	status(sam, map[string]any{"to": "completed", "occurred_at": e.now.Add(-time.Hour)}, http.StatusForbidden)
 	coolAt := e.now.Add(-2 * time.Hour)
 	status(km, map[string]any{"to": "cooling", "occurred_at": startedAt.Add(-time.Minute)}, http.StatusBadRequest) // before start
 	status(km, map[string]any{"to": "cooling", "occurred_at": coolAt}, http.StatusOK)
@@ -92,10 +88,8 @@ func TestLifecycleAndKilnFlow(t *testing.T) {
 		t.Fatalf("est unload after correction = %v", got)
 	}
 
-	status(sam, map[string]any{"to": "unloaded", "source": "kiln_qr"}, http.StatusOK)
-	status(sam, map[string]any{"to": "ready_for_pickup"}, http.StatusForbidden)
-	status(km, map[string]any{"to": "ready_for_pickup"}, http.StatusOK)
-	d = status(km, map[string]any{"to": "completed"}, http.StatusOK)
+	// Unloading, ready for pickup and completed are one step, and anyone can take it.
+	d = status(sam, map[string]any{"to": "completed", "source": "kiln_qr"}, http.StatusOK)
 	if jget(d, "firing", "completed_at") == nil || len(jget(d, "can", "next_steps").([]any)) != 0 {
 		t.Fatalf("completed = %v", d)
 	}
@@ -116,9 +110,9 @@ func TestLifecycleAndKilnFlow(t *testing.T) {
 
 func TestKilnMasterSkipsToStart(t *testing.T) {
 	e := newFiringEnv(t)
-	km := e.login("Kim", true, false)
+	km := e.login("Kim", true)
 	d := km.mustDo("POST", "/api/firings", map[string]any{"firing_type": "bisque", "cone": "04",
-		"scheduled_start": e.now.Add(time.Hour), "description": "bowls", "share_pct": 80}, http.StatusCreated)
+		"scheduled_date": dayOf(e.now.Add(time.Hour)), "description": "bowls", "share_pct": 80}, http.StatusCreated)
 	base := fmt.Sprintf("/api/firings/%d", int64(jget(d, "firing", "id").(float64)))
 	d = km.mustDo("POST", base+"/confirm", nil, http.StatusOK)
 	if steps := jget(d, "can", "next_steps").([]any); len(steps) != 2 || steps[1] != "firing" {
@@ -130,26 +124,26 @@ func TestKilnMasterSkipsToStart(t *testing.T) {
 
 func TestManagePeople(t *testing.T) {
 	e := newFiringEnv(t)
-	km := e.login("Kim", true, false)
+	km := e.login("Kim", true)
 	boss := e.loginWith("Boss", map[string]any{"admin": true})
-	mo := e.login("Mo", false, false)
+	mo := e.login("Mo", false)
 	moID := jget(mo.mustDo("GET", "/api/me", nil, http.StatusOK), "id")
 	bossID := jget(boss.mustDo("GET", "/api/me", nil, http.StatusOK), "id")
 	user := func(id any) string { return fmt.Sprintf("/api/admin/users/%v", id) }
 
+	// Only admins see the people page; kiln masters don't manage people.
 	mo.mustDo("GET", "/api/admin/users", nil, http.StatusForbidden)
-	users := km.mustDo("GET", "/api/admin/users", nil, http.StatusOK)["items"].([]any)
+	km.mustDo("GET", "/api/admin/users", nil, http.StatusForbidden)
+	users := boss.mustDo("GET", "/api/admin/users", nil, http.StatusOK)["items"].([]any)
 	if len(users) != 3 {
 		t.Fatalf("users = %v", users)
 	}
 
-	mo.mustDo("PATCH", user(moID), map[string]any{"self_loader": true}, http.StatusForbidden)
-	km.mustDo("PATCH", user(moID), map[string]any{"self_loader": true}, http.StatusNoContent)
-	if me := mo.mustDo("GET", "/api/me", nil, http.StatusOK); jget(me, "roles", "self_loader") != true {
-		t.Fatalf("mo roles = %v", me["roles"])
-	}
 	km.mustDo("PATCH", user(moID), map[string]any{"admin": true}, http.StatusForbidden)
 	boss.mustDo("PATCH", user(moID), map[string]any{"admin": true}, http.StatusNoContent)
+	if me := mo.mustDo("GET", "/api/me", nil, http.StatusOK); jget(me, "roles", "admin") != true {
+		t.Fatalf("mo roles = %v", me["roles"])
+	}
 	boss.mustDo("PATCH", user(bossID), map[string]any{"admin": false}, http.StatusConflict)
-	boss.mustDo("PATCH", user(999999), map[string]any{"self_loader": true}, http.StatusNotFound)
+	boss.mustDo("PATCH", user(999999), map[string]any{"admin": true}, http.StatusNotFound)
 }

@@ -11,13 +11,13 @@ import (
 
 func TestPublicUpcomingAndCalendar(t *testing.T) {
 	e := newFiringEnv(t)
-	alice := e.login("Alice", false, false)
-	bob := e.login("Bob", false, false)
-	km := e.login("Kim", true, false)
+	alice := e.login("Alice", false)
+	bob := e.login("Bob", false)
+	km := e.login("Kim", true)
 
 	mk := func(c *apiClient, in time.Duration, share int) string {
 		d := c.mustDo("POST", "/api/firings", map[string]any{"firing_type": "glaze", "cone": "6",
-			"scheduled_start": e.now.Add(in), "description": "secret notes", "share_pct": share,
+			"scheduled_date": dayOf(e.now.Add(in)), "description": "secret notes", "share_pct": share,
 			"notes": "my private note"}, http.StatusCreated)
 		return fmt.Sprintf("/api/firings/%d", int64(jget(d, "firing", "id").(float64)))
 	}
@@ -76,7 +76,7 @@ func TestPublicUpcomingAndCalendar(t *testing.T) {
 
 func TestAdminSettings(t *testing.T) {
 	e := newFiringEnv(t)
-	km := e.login("Kim", true, false)
+	km := e.login("Kim", true)
 	admin := e.loginWith("Ada", map[string]any{"admin": true})
 
 	km.mustDo("GET", "/api/admin/settings", nil, http.StatusForbidden)

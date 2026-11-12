@@ -2,7 +2,7 @@
 
 -- name: CreateFiring :one
 INSERT INTO firings (
-    kiln_id, proposed_by_user_id, firing_type, cone, title, notes, scheduled_start,
+    kiln_id, proposed_by_user_id, firing_type, cone, title, notes, scheduled_date,
     proposer_description, proposer_share_pct, proposer_cone, proposer_clay_body, requests_close_at
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
@@ -30,8 +30,8 @@ SELECT sqlc.embed(f),
                  AND r.status IN ('pending', 'approved')) AS has_my_request
 FROM firings f
 JOIN users u ON u.id = f.proposed_by_user_id
-WHERE f.status NOT IN ('completed', 'cancelled') OR f.scheduled_start >= sqlc.arg(since)
-ORDER BY f.scheduled_start, f.id;
+WHERE f.status NOT IN ('completed', 'cancelled') OR f.scheduled_date >= sqlc.arg(since)
+ORDER BY f.scheduled_date, f.id;
 
 -- name: SetFiringStatus :one
 UPDATE firings
@@ -46,7 +46,7 @@ RETURNING *;
 -- name: RescheduleFiring :one
 -- Clears job idempotency markers so reminders fire again for the new time.
 UPDATE firings
-SET scheduled_start = sqlc.arg(scheduled_start),
+SET scheduled_date = sqlc.arg(scheduled_date),
     requests_close_at = sqlc.arg(requests_close_at),
     underfilled_alert_sent_at = NULL,
     missed_start_reminder_sent_at = NULL,
@@ -70,13 +70,6 @@ SET requests_closed_manually = sqlc.arg(closed_manually),
     updated_at = now()
 WHERE id = sqlc.arg(id)
 RETURNING *;
-
--- name: SetLoader :one
-UPDATE firings SET loader_user_id = sqlc.narg(loader_user_id), updated_at = now()
-WHERE id = sqlc.arg(id)
-RETURNING *;
-
--- ── Requests ────────────────────────────────────────────────────────────────
 
 -- name: ListRequestsForFiring :many
 SELECT sqlc.embed(r), u.display_name AS user_name, u.avatar_url AS user_avatar_url, u.community AS user_community
@@ -154,15 +147,6 @@ ORDER BY e.occurred_at, e.id;
 
 -- ── Users ───────────────────────────────────────────────────────────────────
 
--- name: ListLoaderCandidates :many
--- Self-loaders and kiln masters (admins are offered too).
-SELECT u.id, u.display_name, u.is_self_loader,
-       EXISTS (SELECT 1 FROM accounts a WHERE a.user_id = u.id AND a.is_kiln_master) AS is_kiln_master
-FROM users u
-WHERE u.is_self_loader OR u.is_admin
-   OR EXISTS (SELECT 1 FROM accounts a WHERE a.user_id = u.id AND a.is_kiln_master)
-ORDER BY u.display_name;
-
 -- name: GetUserName :one
 SELECT display_name FROM users WHERE id = $1;
 
@@ -204,6 +188,6 @@ SELECT sqlc.embed(f), u.display_name AS proposer_name
 FROM firings f
 JOIN users u ON u.id = f.proposed_by_user_id
 WHERE (sqlc.arg(kiln_id)::bigint = 0 OR f.kiln_id = sqlc.arg(kiln_id))
-  AND (f.status IN ('loading', 'loaded', 'firing', 'cooling', 'unloaded')
-       OR (f.status = 'confirmed' AND f.scheduled_start BETWEEN sqlc.arg(window_start) AND sqlc.arg(window_end)))
-ORDER BY f.scheduled_start, f.id;
+  AND (f.status IN ('loading', 'loaded', 'firing', 'cooling')
+       OR (f.status = 'confirmed' AND f.scheduled_date BETWEEN sqlc.arg(window_start) AND sqlc.arg(window_end)))
+ORDER BY f.scheduled_date, f.id;

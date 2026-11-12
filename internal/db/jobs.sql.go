@@ -16,16 +16,21 @@ SELECT id FROM firings
 WHERE (status IN ('proposed', 'on_hold', 'confirmed') AND requests_close_handled_at IS NULL
        AND (requests_close_at <= $1 OR requests_closed_manually))
    OR (status IN ('confirmed', 'loading', 'loaded') AND missed_start_reminder_sent_at IS NULL
-       AND scheduled_start <= $1)
+       AND scheduled_date <= $2)
    OR (status IN ('firing', 'cooling') AND missed_unload_reminder_sent_at IS NULL
        AND estimated_unload_at <= $1)
 ORDER BY id
 `
 
+type ListJobCandidatesParams struct {
+	Now   time.Time `json:"now"`
+	Today time.Time `json:"today"`
+}
+
 // ── Scheduled jobs (M4, spec §10) ──────────────────────────────────────────
 // Firings some job might act on. jobs.Due makes the final call (grace periods etc.).
-func (q *Queries) ListJobCandidates(ctx context.Context, now time.Time) ([]int64, error) {
-	rows, err := q.db.Query(ctx, listJobCandidates, now)
+func (q *Queries) ListJobCandidates(ctx context.Context, arg ListJobCandidatesParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listJobCandidates, arg.Now, arg.Today)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +56,7 @@ SET requests_close_handled_at = COALESCE($1, requests_close_handled_at),
     missed_start_reminder_sent_at = COALESCE($3, missed_start_reminder_sent_at),
     missed_unload_reminder_sent_at = COALESCE($4, missed_unload_reminder_sent_at)
 WHERE id = $5
-RETURNING id, kiln_id, proposed_by_user_id, firing_type, cone, title, notes, scheduled_start, status, was_confirmed, hold_reason, cancel_reason, proposer_description, proposer_share_pct, proposer_cone, proposer_clay_body, fullness_override_pct, requests_close_at, requests_closed_manually, loader_user_id, program, estimated_duration_minutes, started_at, estimated_unload_at, cooling_at, unloaded_at, ready_for_pickup_at, completed_at, underfilled_alert_sent_at, missed_start_reminder_sent_at, missed_unload_reminder_sent_at, created_at, updated_at, requests_close_handled_at
+RETURNING id, kiln_id, proposed_by_user_id, firing_type, cone, title, notes, status, was_confirmed, hold_reason, cancel_reason, proposer_description, proposer_share_pct, proposer_cone, proposer_clay_body, fullness_override_pct, requests_close_at, requests_closed_manually, program, estimated_duration_minutes, started_at, estimated_unload_at, cooling_at, unloaded_at, ready_for_pickup_at, completed_at, underfilled_alert_sent_at, missed_start_reminder_sent_at, missed_unload_reminder_sent_at, created_at, updated_at, requests_close_handled_at, scheduled_date
 `
 
 type MarkJobsDoneParams struct {
@@ -80,7 +85,6 @@ func (q *Queries) MarkJobsDone(ctx context.Context, arg MarkJobsDoneParams) (Fir
 		&i.Cone,
 		&i.Title,
 		&i.Notes,
-		&i.ScheduledStart,
 		&i.Status,
 		&i.WasConfirmed,
 		&i.HoldReason,
@@ -92,7 +96,6 @@ func (q *Queries) MarkJobsDone(ctx context.Context, arg MarkJobsDoneParams) (Fir
 		&i.FullnessOverridePct,
 		&i.RequestsCloseAt,
 		&i.RequestsClosedManually,
-		&i.LoaderUserID,
 		&i.Program,
 		&i.EstimatedDurationMinutes,
 		&i.StartedAt,
@@ -107,6 +110,7 @@ func (q *Queries) MarkJobsDone(ctx context.Context, arg MarkJobsDoneParams) (Fir
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RequestsCloseHandledAt,
+		&i.ScheduledDate,
 	)
 	return i, err
 }

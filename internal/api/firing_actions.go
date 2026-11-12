@@ -317,8 +317,8 @@ func (s *Server) handleDecideRequest(w http.ResponseWriter, r *http.Request) {
 
 // ── Kiln master actions ─────────────────────────────────────────────────────
 
-func actorFor(f db.Firing, u *currentUser) firing.Actor {
-	return firing.Actor{Roles: u.Roles, IsLoader: f.LoaderUserID != nil && *f.LoaderUserID == u.ID}
+func actorFor(u *currentUser) firing.Actor {
+	return firing.Actor{Roles: u.Roles}
 }
 
 func stateOf(f db.Firing) firing.State {
@@ -345,7 +345,7 @@ func (s *Server) changeStatus(ctx context.Context, q *db.Queries, f db.Firing, u
 
 func (s *Server) handleConfirm(w http.ResponseWriter, r *http.Request) {
 	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser, n *notify.Batch) ([]string, error) {
-		to, err := firing.Confirm(stateOf(f), actorFor(f, u))
+		to, err := firing.Confirm(stateOf(f), actorFor(u))
 		if err != nil {
 			return nil, err
 		}
@@ -364,7 +364,7 @@ func (s *Server) handleHold(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser, n *notify.Batch) ([]string, error) {
-		to, err := firing.Hold(stateOf(f), actorFor(f, u))
+		to, err := firing.Hold(stateOf(f), actorFor(u))
 		if err != nil {
 			return nil, err
 		}
@@ -385,7 +385,7 @@ func (s *Server) handleCancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser, n *notify.Batch) ([]string, error) {
-		to, err := firing.Cancel(stateOf(f), actorFor(f, u))
+		to, err := firing.Cancel(stateOf(f), actorFor(u))
 		if err != nil {
 			return nil, err
 		}
@@ -402,39 +402,35 @@ func (s *Server) handleCancel(w http.ResponseWriter, r *http.Request) {
 }
 
 type rescheduleInput struct {
-	ScheduledStart *time.Time `json:"scheduled_start"`
-	Note           *string    `json:"note"`
+	ScheduledDate *Day    `json:"scheduled_date"`
+	Note          *string `json:"note"`
 }
 
-// reschedule moves the start (and the automatic requests cutoff with it).
-func (s *Server) reschedule(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser, n *notify.Batch, start time.Time, note *string) error {
-	start = start.UTC()
-	if !start.After(s.now()) {
-		return badRequest("the new start time must be in the future")
+// reschedule moves a firing to another day (and the automatic requests cutoff
+// with it). The start time isn't promised, so only the day is set.
+func (s *Server) reschedule(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser, n *notify.Batch, day time.Time, note *string) error {
+	loc := s.studioLocation(ctx, q)
+	if !firing.DayEnd(day, loc).After(s.now()) {
+		return badRequest("that day has already passed")
 	}
 	st, err := q.GetSettings(ctx)
 	if err != nil {
 		return err
 	}
 	if _, err := q.RescheduleFiring(ctx, db.RescheduleFiringParams{
-		ID: f.ID, ScheduledStart: start, RequestsCloseAt: firing.RequestsCloseAt(start, st.RequestCutoffHours),
+		ID: f.ID, ScheduledDate: day, RequestsCloseAt: firing.RequestsCloseAt(firing.DayStart(day, loc), st.RequestCutoffHours),
 	}); err != nil {
 		return err
 	}
-	loc, err := time.LoadLocation(st.Timezone)
-	if err != nil {
-		loc = time.UTC
-	}
-	const layout = "Mon Jan 2, 3:04 PM"
-	ev := fmt.Sprintf("Moved from %s to %s", f.ScheduledStart.In(loc).Format(layout), start.In(loc).Format(layout))
+	ev := fmt.Sprintf("Moved from %s to %s", firing.DayLabel(f.ScheduledDate), firing.DayLabel(day))
 	if note != nil {
 		ev += ": " + *note
 	}
 	if err := s.logEvent(ctx, q, f, u, firing.EventRescheduled, nil, nil, &ev); err != nil {
 		return err
 	}
-	n.ThreadReply(notify.ThreadRescheduled(start, loc))
-	return s.dmParticipants(ctx, q, f, n, notify.DMRescheduled(f, start, loc, notify.FiringURL(s.cfg.AppBaseURL, f.ID)))
+	n.ThreadReply(notify.ThreadRescheduled(day))
+	return s.dmParticipants(ctx, q, f, n, notify.DMRescheduled(f, day, notify.FiringURL(s.cfg.AppBaseURL, f.ID)))
 }
 
 // handleRelease: on_hold → proposed/confirmed, optionally with a new start.
@@ -444,7 +440,7 @@ func (s *Server) handleRelease(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser, n *notify.Batch) ([]string, error) {
-		to, err := firing.Release(stateOf(f), actorFor(f, u))
+		to, err := firing.Release(stateOf(f), actorFor(u))
 		if err != nil {
 			return nil, err
 		}
@@ -452,8 +448,8 @@ func (s *Server) handleRelease(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return nil, err
 		}
-		if in.ScheduledStart != nil && !in.ScheduledStart.Equal(f.ScheduledStart) {
-			if err := s.reschedule(ctx, q, f, u, n, *in.ScheduledStart, nil); err != nil {
+		if in.ScheduledDate != nil && !time.Time(*in.ScheduledDate).Equal(f.ScheduledDate) {
+			if err := s.reschedule(ctx, q, f, u, n, time.Time(*in.ScheduledDate), nil); err != nil {
 				return nil, err
 			}
 		}
@@ -468,11 +464,11 @@ func (s *Server) handleReschedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser, n *notify.Batch) ([]string, error) {
-		if err := firing.Reschedule(stateOf(f), actorFor(f, u)); err != nil {
+		if err := firing.Reschedule(stateOf(f), actorFor(u)); err != nil {
 			return nil, err
 		}
-		if in.ScheduledStart == nil {
-			return nil, badRequest("new start time is required")
+		if in.ScheduledDate == nil {
+			return nil, badRequest("new date is required")
 		}
 		note, err := optText("note", in.Note, maxReason)
 		if err != nil {
@@ -482,7 +478,7 @@ func (s *Server) handleReschedule(w http.ResponseWriter, r *http.Request) {
 		if f.RequestsClosedManually {
 			warnings = append(warnings, "Requests are still closed; reopen them if you want more work.")
 		}
-		return warnings, s.reschedule(ctx, q, f, u, n, *in.ScheduledStart, note)
+		return warnings, s.reschedule(ctx, q, f, u, n, time.Time(*in.ScheduledDate), note)
 	})
 }
 
@@ -539,7 +535,7 @@ func (s *Server) handleRequestsWindow(w http.ResponseWriter, r *http.Request) {
 		}
 		closeAt, event := f.RequestsCloseAt, firing.EventRequestsClosed
 		if !in.Closed {
-			closeAt, event = firing.ReopenCloseAt(f.RequestsCloseAt, f.ScheduledStart, s.now()), firing.EventRequestsReopened
+			closeAt, event = firing.ReopenCloseAt(f.RequestsCloseAt, firing.DayStart(f.ScheduledDate, s.studioLocation(ctx, q)), s.now()), firing.EventRequestsReopened
 		}
 		updated, err := q.SetRequestsWindow(ctx, db.SetRequestsWindowParams{
 			ID: f.ID, ClosedManually: in.Closed, RequestsCloseAt: closeAt,
@@ -553,65 +549,6 @@ func (s *Server) handleRequestsWindow(w http.ResponseWriter, r *http.Request) {
 		}
 		return warnings, s.logEvent(ctx, q, f, u, event, nil, nil, nil)
 	})
-}
-
-type loaderInput struct {
-	UserID *int64 `json:"user_id"` // null unassigns
-}
-
-func (s *Server) handleAssignLoader(w http.ResponseWriter, r *http.Request) {
-	var in loaderInput
-	if !s.readJSON(w, r, &in) {
-		return
-	}
-	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser, n *notify.Batch) ([]string, error) {
-		if err := requireManage(f, u); err != nil {
-			return nil, err
-		}
-		note := "Unassigned the loader"
-		if in.UserID != nil {
-			lu, err := q.GetUser(ctx, *in.UserID)
-			if err != nil {
-				return nil, badRequest("unknown user")
-			}
-			roles, err := s.rolesFor(ctx, q, lu)
-			if err != nil {
-				return nil, err
-			}
-			if !roles.CanBeLoader() {
-				return nil, badRequest("%s isn't a self-loader or kiln master", lu.DisplayName)
-			}
-			note = "Assigned " + lu.DisplayName + " as loader"
-		}
-		if _, err := q.SetLoader(ctx, db.SetLoaderParams{ID: f.ID, LoaderUserID: in.UserID}); err != nil {
-			return nil, err
-		}
-		return nil, s.logEvent(ctx, q, f, u, firing.EventLoaderAssigned, nil, nil, &note)
-	})
-}
-
-type loaderCandidateDTO struct {
-	ID           int64  `json:"id"`
-	Name         string `json:"name"`
-	IsKilnMaster bool   `json:"is_kiln_master"`
-	IsSelfLoader bool   `json:"is_self_loader"`
-}
-
-func (s *Server) handleLoaderCandidates(w http.ResponseWriter, r *http.Request) {
-	if !userFromContext(r.Context()).Roles.CanManageFirings() {
-		s.fail(w, r, forbidden("only kiln masters can do that"))
-		return
-	}
-	rows, err := s.queries.ListLoaderCandidates(r.Context())
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	out := make([]loaderCandidateDTO, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, loaderCandidateDTO{row.ID, row.DisplayName, row.IsKilnMaster, row.IsSelfLoader})
-	}
-	writeJSON(w, http.StatusOK, out)
 }
 
 // dmParticipants DMs the proposer and everyone with a pending or approved request.

@@ -1,6 +1,6 @@
 import { useEffect, useRef, type ReactNode } from 'react'
 import { Link } from 'react-router'
-import { formatDay } from '../lib/time'
+import { dayParts } from '../lib/time'
 import type { Firing, FiringStatus, FiringSummary, Fullness, Kiln, Options } from '../lib/types'
 
 /** The kiln's name, but only when there's more than one kiln (otherwise it's noise). */
@@ -19,8 +19,6 @@ export const STATUS_LABELS: Record<FiringStatus, string> = {
   loaded: 'Loaded',
   firing: 'Firing',
   cooling: 'Cooling',
-  unloaded: 'Unloaded',
-  ready_for_pickup: 'Ready for pickup',
   completed: 'Completed',
   cancelled: 'Cancelled',
 }
@@ -33,8 +31,6 @@ const STATUS_STYLES: Record<FiringStatus, string> = {
   loaded: 'bg-indigo-100 text-indigo-900',
   firing: 'bg-red-600 text-white',
   cooling: 'bg-blue-100 text-blue-900',
-  unloaded: 'bg-teal-100 text-teal-900',
-  ready_for_pickup: 'bg-teal-600 text-white',
   completed: 'bg-stone-200 text-stone-700',
   cancelled: 'bg-stone-200 text-stone-500 line-through',
 }
@@ -98,7 +94,7 @@ export function KilnFootnote({ kiln }: { kiln: Kiln }) {
 // ── Firing card (lists) ─────────────────────────────────────────────────────
 
 export function FiringCard({ firing, options }: { firing: FiringSummary; options: Options }) {
-  const d = formatDay(firing.scheduled_start, options.timezone)
+  const d = dayParts(firing.scheduled_date)
   const kiln = kilnLabel(options, firing.kiln_id)
   return (
     <Link to={`/firings/${firing.id}`} className="card flex gap-4 active:bg-stone-50">
@@ -113,8 +109,7 @@ export function FiringCard({ firing, options }: { firing: FiringSummary; options
           <StatusBadge status={firing.status} />
         </div>
         <p className="text-sm text-stone-600">
-          {d.time}
-          {kiln && ` · ${kiln}`} · by {firing.proposer.name}
+          {kiln && `${kiln} · `}by {firing.proposer.name}
           {firing.pending_count > 0 && (
             <span className="ml-2 font-semibold text-orange-700">{firing.pending_count} pending</span>
           )}

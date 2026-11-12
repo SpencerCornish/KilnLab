@@ -52,8 +52,8 @@ type apiClient struct {
 }
 
 // login signs in through the dev login endpoint.
-func (e *firingEnv) login(name string, km, selfLoader bool) *apiClient {
-	return e.loginWith(name, map[string]any{"kiln_master": km, "self_loader": selfLoader})
+func (e *firingEnv) login(name string, km bool) *apiClient {
+	return e.loginWith(name, map[string]any{"kiln_master": km})
 }
 
 func (e *firingEnv) loginWith(name string, flags map[string]any) *apiClient {
@@ -130,23 +130,23 @@ func jget(m map[string]any, keys ...string) any {
 
 func TestFiringsAndRequestsFlow(t *testing.T) {
 	e := newFiringEnv(t)
-	alice := e.login("Alice", false, false) // proposer
-	bob := e.login("Bob", false, false)     // requester
-	km := e.login("Kim", true, false)       // kiln master
+	alice := e.login("Alice", false) // proposer
+	bob := e.login("Bob", false)     // requester
+	km := e.login("Kim", true)       // kiln master
 
 	start := e.now.Add(72 * time.Hour)
 	proposal := map[string]any{
-		"firing_type": "glaze", "cone": "6", "scheduled_start": start,
+		"firing_type": "glaze", "cone": "6", "scheduled_date": dayOf(start),
 		"description": "4 mugs", "share_pct": 30,
 	}
 
 	// Minimum notice: members need 48h, kiln masters can bypass.
-	soon := map[string]any{"firing_type": "glaze", "cone": "6", "scheduled_start": e.now.Add(24 * time.Hour),
+	soon := map[string]any{"firing_type": "glaze", "cone": "6", "scheduled_date": dayOf(e.now.Add(24 * time.Hour)),
 		"description": "x", "share_pct": 10}
 	alice.mustDo("POST", "/api/firings", soon, http.StatusBadRequest)
 	km.mustDo("POST", "/api/firings", soon, http.StatusCreated)
 	alice.mustDo("POST", "/api/firings", map[string]any{"firing_type": "raku", "cone": "6",
-		"scheduled_start": start, "description": "x", "share_pct": 10}, http.StatusBadRequest)
+		"scheduled_date": dayOf(start), "description": "x", "share_pct": 10}, http.StatusBadRequest)
 
 	d := alice.mustDo("POST", "/api/firings", proposal, http.StatusCreated)
 	id := int64(jget(d, "firing", "id").(float64))
@@ -216,20 +216,21 @@ func TestFiringsAndRequestsFlow(t *testing.T) {
 		t.Fatalf("held = %v / %v", d["firing"], d["can"])
 	}
 	newStart := start.Add(24 * time.Hour)
-	d = km.mustDo("POST", base+"/release", map[string]any{"scheduled_start": newStart}, http.StatusOK)
+	d = km.mustDo("POST", base+"/release", map[string]any{"scheduled_date": dayOf(newStart)}, http.StatusOK)
 	if jget(d, "firing", "status") != "confirmed" || jget(d, "firing", "hold_reason") != nil {
 		t.Fatalf("released = %v", d["firing"])
 	}
-	if got, _ := time.Parse(time.RFC3339, jget(d, "firing", "scheduled_start").(string)); !got.Equal(newStart) {
-		t.Fatalf("release reschedule: start = %v", got)
+	if got := jget(d, "firing", "scheduled_date"); got != dayOf(newStart) {
+		t.Fatalf("release reschedule: day = %v", got)
 	}
-	wantClose := newStart.Add(-12 * time.Hour)
+	// The cutoff counts from the start of the scheduled day.
+	wantClose := dayStart(newStart).Add(-12 * time.Hour)
 	if got, _ := time.Parse(time.RFC3339, jget(d, "firing", "requests_close_at").(string)); !got.Equal(wantClose) {
 		t.Fatalf("close_at = %v, want %v", got, wantClose)
 	}
 
 	// Close/reopen requests.
-	carol := e.login("Carol", false, false)
+	carol := e.login("Carol", false)
 	km.mustDo("PUT", base+"/requests-window", map[string]any{"closed": true}, http.StatusOK)
 	carol.mustDo("POST", base+"/requests", map[string]any{"description": "x", "share_pct": 5, "cone": "6"}, http.StatusConflict)
 	bob.mustDo("POST", fmt.Sprintf("%s/requests/%d/withdraw", base, rid), nil, http.StatusConflict)
@@ -238,13 +239,13 @@ func TestFiringsAndRequestsFlow(t *testing.T) {
 	carolRid := int64(jget(d, "my_request", "id").(float64))
 
 	// The automatic cutoff: 12h before the start.
-	e.advance(newStart.Sub(e.now) - 12*time.Hour)
+	e.advance(wantCloseFrom(e, newStart))
 	d = carol.mustDo("GET", base, nil, http.StatusOK)
 	if jget(d, "firing", "requests_open") != false || jget(d, "my_request", "can", "withdraw") != false {
 		t.Fatalf("after cutoff: %v", d)
 	}
 	carol.mustDo("POST", fmt.Sprintf("%s/requests/%d/withdraw", base, carolRid), nil, http.StatusConflict)
-	dave := e.login("Dave", false, false)
+	dave := e.login("Dave", false)
 	dave.mustDo("POST", base+"/requests", map[string]any{"description": "x", "share_pct": 5, "cone": "6"}, http.StatusConflict)
 
 	// Reopening after the cutoff extends the window up to the start.
@@ -253,15 +254,15 @@ func TestFiringsAndRequestsFlow(t *testing.T) {
 
 	// Reschedule (kiln master only), then cancel with a reason.
 	later := newStart.Add(48 * time.Hour)
-	alice.mustDo("POST", base+"/reschedule", map[string]any{"scheduled_start": later}, http.StatusForbidden)
-	km.mustDo("POST", base+"/reschedule", map[string]any{"scheduled_start": e.now.Add(-time.Hour)}, http.StatusBadRequest)
-	km.mustDo("POST", base+"/reschedule", map[string]any{"scheduled_start": later}, http.StatusOK)
+	alice.mustDo("POST", base+"/reschedule", map[string]any{"scheduled_date": dayOf(later)}, http.StatusForbidden)
+	km.mustDo("POST", base+"/reschedule", map[string]any{"scheduled_date": dayOf(e.now.Add(-48 * time.Hour))}, http.StatusBadRequest)
+	km.mustDo("POST", base+"/reschedule", map[string]any{"scheduled_date": dayOf(later)}, http.StatusOK)
 	km.mustDo("POST", base+"/cancel", map[string]any{"reason": ""}, http.StatusBadRequest)
 	d = km.mustDo("POST", base+"/cancel", map[string]any{"reason": "kiln broken"}, http.StatusOK)
 	if jget(d, "firing", "status") != "cancelled" || jget(d, "firing", "cancel_reason") != "kiln broken" {
 		t.Fatalf("cancelled = %v", d["firing"])
 	}
-	km.mustDo("POST", base+"/reschedule", map[string]any{"scheduled_start": later}, http.StatusConflict)
+	km.mustDo("POST", base+"/reschedule", map[string]any{"scheduled_date": dayOf(later)}, http.StatusConflict)
 	km.mustDo("POST", decide, map[string]any{"decision": "decline"}, http.StatusConflict)
 
 	// Every change wrote a timeline event.
@@ -292,32 +293,6 @@ func TestFiringsAndRequestsFlow(t *testing.T) {
 	}
 }
 
-func TestLoaderAssignment(t *testing.T) {
-	e := newFiringEnv(t)
-	km := e.login("Kim", true, false)
-	sam := e.login("Sam", false, true) // self-loader
-	mo := e.login("Mo", false, false)
-
-	d := km.mustDo("POST", "/api/firings", map[string]any{"firing_type": "bisque", "cone": "04",
-		"scheduled_start": e.now.Add(72 * time.Hour), "description": "greenware", "share_pct": 50}, http.StatusCreated)
-	base := fmt.Sprintf("/api/firings/%d", int64(jget(d, "firing", "id").(float64)))
-
-	cands := km.mustDo("GET", "/api/loaders", nil, http.StatusOK)["items"].([]any)
-	if len(cands) != 2 { // Kim and Sam
-		t.Fatalf("loader candidates = %v", cands)
-	}
-	mo.mustDo("GET", "/api/loaders", nil, http.StatusForbidden)
-
-	samID := jget(sam.mustDo("GET", "/api/me", nil, http.StatusOK), "id")
-	moID := jget(mo.mustDo("GET", "/api/me", nil, http.StatusOK), "id")
-	km.mustDo("PUT", base+"/loader", map[string]any{"user_id": moID}, http.StatusBadRequest)
-	sam.mustDo("PUT", base+"/loader", map[string]any{"user_id": samID}, http.StatusForbidden)
-	d = km.mustDo("PUT", base+"/loader", map[string]any{"user_id": samID}, http.StatusOK)
-	if jget(d, "loader", "name") != "Sam" {
-		t.Fatalf("loader = %v", d["loader"])
-	}
-}
-
 func TestMultipleKilns(t *testing.T) {
 	e, pool := newFiringEnvPool(t)
 	ctx := t.Context()
@@ -330,7 +305,7 @@ func TestMultipleKilns(t *testing.T) {
 	}
 	// (openTestPool removes extra kilns before each test.)
 
-	alice := e.login("Alice", false, false)
+	alice := e.login("Alice", false)
 	kilns := alice.mustDo("GET", "/api/options", nil, http.StatusOK)["kilns"].([]any)
 	if len(kilns) != 3 || kilns[2].(map[string]any)["active"] != false {
 		t.Fatalf("options kilns = %v", kilns)
@@ -338,7 +313,7 @@ func TestMultipleKilns(t *testing.T) {
 
 	body := func(kilnID int64) map[string]any {
 		return map[string]any{"kiln_id": kilnID, "firing_type": "glaze", "cone": "6",
-			"scheduled_start": e.now.Add(72 * time.Hour), "description": "mugs", "share_pct": 20}
+			"scheduled_date": dayOf(e.now.Add(72 * time.Hour)), "description": "mugs", "share_pct": 20}
 	}
 	// With two active kilns the kiln must be chosen, and must be active.
 	alice.mustDo("POST", "/api/firings", body(0), http.StatusBadRequest)
@@ -348,4 +323,9 @@ func TestMultipleKilns(t *testing.T) {
 	if jget(d, "firing", "kiln_id") != float64(second) {
 		t.Fatalf("kiln_id = %v, want %d", jget(d, "firing", "kiln_id"), second)
 	}
+}
+
+// wantCloseFrom is how far to advance the clock to reach the automatic cutoff for a day starting at start.
+func wantCloseFrom(e *firingEnv, start time.Time) time.Duration {
+	return dayStart(start).Add(-12 * time.Hour).Sub(e.now)
 }

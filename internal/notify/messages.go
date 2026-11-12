@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/spencercornish/kilnlab/internal/db"
+	"github.com/spencercornish/kilnlab/internal/firing"
 )
 
 // Texts for threaded replies and DMs. Plain text with a link; both platforms
@@ -28,8 +29,8 @@ func ThreadReady() string { return "✅ Ready for pickup!" }
 
 func ThreadCancelled(reason string) string { return "❌ Cancelled — " + reason }
 
-func ThreadRescheduled(newStart time.Time, loc *time.Location) string {
-	return "📅 Moved to " + newStart.In(loc).Format(whenLayout)
+func ThreadRescheduled(newDay time.Time) string {
+	return "📅 Moved to " + firing.DayLabel(newDay)
 }
 
 func withNote(s string, note *string) string {
@@ -47,9 +48,9 @@ func DMDeclined(f db.Firing, loc *time.Location, note *string, url string) strin
 	return withNote(fmt.Sprintf("Your request in %s was declined.", Describe(f, loc)), note) + "\n" + url
 }
 
-func DMRescheduled(f db.Firing, newStart time.Time, loc *time.Location, url string) string {
+func DMRescheduled(f db.Firing, newDay time.Time, url string) string {
 	return fmt.Sprintf("📅 %s was moved from %s to %s.\n%s", Title(f),
-		f.ScheduledStart.In(loc).Format(whenLayout), newStart.In(loc).Format(whenLayout), url)
+		firing.DayLabel(f.ScheduledDate), firing.DayLabel(newDay), url)
 }
 
 func DMCancelled(f db.Firing, loc *time.Location, reason, url string) string {

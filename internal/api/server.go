@@ -98,7 +98,6 @@ func (s *Server) Handler() http.Handler {
 			r.Use(s.requireUser)
 			r.Get("/me", s.handleMe)
 			r.Get("/options", s.handleOptions)
-			r.Get("/loaders", s.handleLoaderCandidates)
 			r.Get("/kiln", s.handleKiln)
 			r.Get("/admin/users", s.handleListUsers)
 			r.Patch("/admin/users/{id}", s.handleUpdateUser)
@@ -126,7 +125,6 @@ func (s *Server) Handler() http.Handler {
 				r.Post("/cancel", s.handleCancel)
 				r.Put("/fullness-override", s.handleFullnessOverride)
 				r.Put("/requests-window", s.handleRequestsWindow)
-				r.Put("/loader", s.handleAssignLoader)
 
 				// Lifecycle: loading … completed, and fixing times afterwards.
 				r.Post("/status", s.handleAdvance)

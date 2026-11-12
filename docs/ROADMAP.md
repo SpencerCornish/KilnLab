@@ -10,6 +10,8 @@ Legend: ✅ done & tested · 🟡 partial · ⬜ not started · 🚫 blocked on 
 
 _Last updated: 2026-11-11, end of M4 (signed off). M3 committed as `c6a2634`. v1 is now code complete. What's left is owner-blocked (real OAuth apps, bots, staging, phone checks)._
 
+_Post-M4 owner testing changes: unloaded, ready for pickup and completed merged into one `completed` step (migration 004, [DECISIONS](DECISIONS.md) #13). Also: firings are booked by day, not start time (migration 005, [DECISIONS](DECISIONS.md) #14), and the loader role is gone: anyone signed in can say they've loaded or unloaded (migration 006, #15). The owner has more changes to come._
+
 ---
 
 ## Milestone summary
@@ -65,12 +67,12 @@ reschedule, cancel, close/reopen requests; unit tests for state machine, permiss
 | API: request / edit / withdraw (before cutoff) | ✅ | `POST /firings/{id}/requests`, `PUT …/requests/{rid}`, `POST …/withdraw`. Warnings for compat + "may not fit" |
 | API: approve / decline with note | ✅ | `POST …/requests/{rid}/decide`. Kiln masters only |
 | API: confirm / hold / release (+ optional new start) / reschedule / cancel | ✅ | Reason required for hold + cancel |
-| API: fullness override, close/reopen requests, assign loader, loader list | ✅ | `PUT …/fullness-override`, `PUT …/requests-window`, `PUT …/loader`, `GET /api/loaders` |
+| API: fullness override, close/reopen requests | ✅ | `PUT …/fullness-override`, `PUT …/requests-window` (loader assignment removed, #15) |
 | Integration tests for the above | ✅ | `internal/api/firings_integration_test.go` (fake clock for cutoff) |
 | UI: `/` home (my firings, upcoming, recently finished, propose) | ✅ | |
 | UI: `/firings/new` propose form with kiln-size footnote | ✅ | Footnote shows a generic line until kiln dimensions are set (owner, open question 6) |
 | UI: `/firings/:id` detail, fullness bar, requests, timeline, kiln master controls | ✅ | Bottom-sheet forms for reasons/dates. **Not yet checked on a real phone** |
-| `make seed`: sample users + firings in various states | ✅ | Users match dev login names: Kim (KM), Sam (self-loader), Alice, Bob (BMS), Carol |
+| `make seed`: sample users + firings in various states | ✅ | Users match dev login names: Kim (KM), Sam, Alice, Bob (BMS), Carol |
 | Proposer editing their own entry | ⬜ | Not in spec; ask owner if wanted |
 | Notifications for these events | ⬜ | M3: enqueue in the same transaction inside `mutateFiring` |
 
@@ -85,7 +87,7 @@ reschedule, cancel, close/reopen requests; unit tests for state machine, permiss
 | `/kiln` (§9B): relevant firings, auto-open single, pick list, "No active firing" | ✅ | `GET /api/kiln?k=<kiln id>`; QR per kiln (D24) |
 | `/kiln/:id`: summary + only this user's next steps, confirm screen, success screen | ✅ | Events tagged `source = kiln_qr` |
 | Same actions + time fixes on `/firings/:id` | ✅ | |
-| `/admin/users`: self-loader toggle (KM), admin toggle (admin) | ✅ | Can't remove your own admin. `/admin` index links here |
+| `/admin/users`: admin toggle (admin only; self-loader removed, #15) | ✅ | Can't remove your own admin. `/admin` index links here |
 | Integration tests | ✅ | `internal/api/lifecycle_integration_test.go` |
 | **`/kiln` checked on a real phone** (incl. pick list) | ⬜ | Owner/dev to try via LAN URL; real QR needs staging |
 | Ready-for-pickup DMs | ⬜ | M3 (the confirm screen already warns participants will be told) |

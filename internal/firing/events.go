@@ -14,7 +14,6 @@ const (
 	EventFullnessOverride   = "fullness_override"
 	EventRequestsClosed     = "requests_closed"
 	EventRequestsReopened   = "requests_reopened"
-	EventLoaderAssigned     = "loader_assigned"
 	EventTimestampCorrected = "timestamp_corrected"
 )
 

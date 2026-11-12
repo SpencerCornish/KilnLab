@@ -79,29 +79,28 @@ Roles are derived at login and re-checked at each login (§5). A user can have m
 | Role | How determined |
 |---|---|
 | **Member** | Signed in via Discord (in ArtLab guild) or Slack (in BMS workspace) |
-| **Self-loader** | Flag on user record, set by a kiln master in the app |
 | **Kiln master** | Has the configured **Kiln Master role** in the ArtLab Discord guild |
 | **Admin** | Allowlist of user IDs in settings/env (the owner) — can also be kiln master |
 
 ### Permission matrix
 
-| Action | Member | Self-loader | Kiln master | Admin |
-|---|:-:|:-:|:-:|:-:|
-| View public page / iCal | ✓ (no login needed) | ✓ | ✓ | ✓ |
-| Propose a firing | ✓ | ✓ | ✓ | ✓ |
-| Request space in a firing | ✓ | ✓ | ✓ | ✓ |
-| Edit/withdraw own request (before cutoff) | ✓ | ✓ | ✓ | ✓ |
-| Approve/decline requests | proposer of that firing* | proposer* | ✓ | ✓ |
-| Confirm / hold / release / reschedule / cancel firing | | | ✓ | ✓ |
-| Override fullness; close/reopen requests | | | ✓ | ✓ |
-| Bypass minimum notice | | | ✓ | ✓ |
-| Mark **Loading** / **Loaded** | | if assigned as loader | ✓ | ✓ |
-| Mark **Firing (Start)** | | ✗ never | ✓ | ✓ |
-| Mark **Cooling** / **Ready for pickup** / **Completed** | | | ✓ | ✓ |
-| Mark **Unloaded** | | if assigned as loader | ✓ | ✓ |
-| Correct a status timestamp after the fact | | | ✓ | ✓ |
-| Grant/revoke self-loader | | | ✓ | ✓ |
-| Edit settings | | | | ✓ |
+| Action | Member | Kiln master | Admin |
+|---|:-:|:-:|:-:|
+| View public page / iCal | ✓ (no login needed) | ✓ | ✓ |
+| Propose a firing | ✓ | ✓ | ✓ |
+| Request space in a firing | ✓ | ✓ | ✓ |
+| Edit/withdraw own request (before cutoff) | ✓ | ✓ | ✓ |
+| Approve/decline requests | proposer of that firing* | ✓ | ✓ |
+| Confirm / hold / release / reschedule / cancel firing | | ✓ | ✓ |
+| Override fullness; close/reopen requests | | ✓ | ✓ |
+| Bypass minimum notice | | ✓ | ✓ |
+| Mark **Loading** / **Loaded** (scan the kiln code) | ✓ | ✓ | ✓ |
+| Mark **Firing (Start)** | ✗ never | ✓ | ✓ |
+| Mark **Cooling** | | ✓ | ✓ |
+| Mark **Unloaded: ready for pickup** (completes the firing) | ✓ | ✓ | ✓ |
+| Correct a status timestamp after the fact | | ✓ | ✓ |
+| Manage people (admin flag) | | | ✓ |
+| Edit settings | | | ✓ |
 
 \* **[CONFIRM]** whether the firing's proposer can approve requests, or only kiln masters. Default: kiln master only; proposer is notified.
 
@@ -141,7 +140,7 @@ A person in both communities could end up with two user records (one per provide
 ```
             ┌──────────── hold ───────────┐
             ▼                             │
- PROPOSED ──confirm──▶ CONFIRMED ──▶ LOADING ──▶ LOADED ──start──▶ FIRING ──▶ COOLING ──▶ UNLOADED ──▶ READY_FOR_PICKUP ──▶ COMPLETED
+ PROPOSED ──confirm──▶ CONFIRMED ──▶ LOADING ──▶ LOADED ──start──▶ FIRING ──▶ COOLING ──▶ COMPLETED (unloaded + ready for pickup)
     │  ▲                  │  ▲
     │  └──── release ─────┤  │
     ▼                     ▼  │
@@ -156,13 +155,11 @@ A person in both communities could end up with two user records (one per provide
 | `proposed` | Someone proposed it; open for requests | Any member (on create) |
 | `on_hold` | Kiln master paused it (e.g. not enough work yet). Still open for requests unless closed. Has `hold_reason`. | Kiln master |
 | `confirmed` | Kiln master approved; will run on scheduled date | Kiln master |
-| `loading` | Being loaded | Kiln master or assigned loader |
-| `loaded` | Loaded, waiting for kiln master to start | Kiln master or assigned loader |
+| `loading` | Being loaded | Anyone signed in (kiln QR) |
+| `loaded` | Loaded, waiting for kiln master to start | Anyone signed in (kiln QR) |
 | `firing` | Kiln is running. Requires `program` and `estimated_duration` → computes `estimated_unload_at` | **Kiln master only** |
 | `cooling` | Kiln off, cooling | Kiln master |
-| `unloaded` | Work removed from kiln | Kiln master or assigned loader |
-| `ready_for_pickup` | Participants can collect. Triggers pickup DMs. | Kiln master |
-| `completed` | Done | Kiln master (or auto after N days — **[CONFIRM]**, default: manual) |
+| `completed` | Work removed from the kiln, ready for pickup, and done. One step: sets `unloaded_at`, `ready_for_pickup_at` and `completed_at`, and triggers pickup DMs. | Anyone signed in (kiln QR) |
 | `cancelled` | Won't run. Has `cancel_reason`. | Kiln master |
 
 Rules:
@@ -171,15 +168,15 @@ Rules:
 - `release` from `on_hold` returns to `proposed` (or `confirmed` if it had been confirmed before being held) and may change `scheduled_date`.
 - Rescheduling (changing `scheduled_date`) is allowed in `proposed`, `on_hold`, `confirmed` and notifies all participants.
 - Cancelling notifies all participants.
-- Skipping states is allowed for kiln masters (e.g. `confirmed` → `firing` if they forgot to scan loading); intermediate states are just not recorded. Self-loaders cannot skip into `firing`.
+- Skipping states is allowed for kiln masters (e.g. `confirmed` → `firing` if they forgot to scan loading); intermediate states are just not recorded. Anyone signed in can skip to `loading`, `loaded` or `completed`, but not into `firing`.
 
 ### Requests window
 - Requests are open while status ∈ {`proposed`, `on_hold`, `confirmed`} **and** now < `requests_close_at` **and** `requests_closed_manually` is false.
-- `requests_close_at` = `scheduled_start` − `settings.request_cutoff_hours` (default 12h — **[CONFIRM]**).
+- `requests_close_at` = start of `scheduled_date` (local midnight, studio timezone) − `settings.request_cutoff_hours` (default 12h — **[CONFIRM]**).
 - Kiln master can close early or reopen.
 
 ### Minimum notice
-- On create, `scheduled_start` must be ≥ now + `settings.min_notice_hours` (default 48h — **[CONFIRM]**). Kiln masters can bypass.
+- On create, the start of `scheduled_date` (local midnight) must be ≥ now + `settings.min_notice_hours` (default 48h — **[CONFIRM]**). Kiln masters can bypass. A day that has already ended can't be booked.
 
 ---
 
@@ -208,7 +205,7 @@ Rules:
 Suggested tables (adjust naming to stack conventions). All timestamps stored in **UTC**; display in America/Denver.
 
 **users**
-- `id`, `display_name`, `avatar_url`, `community` (`artlab` | `bms`), `is_self_loader` (bool), `is_admin` (bool), `created_at`, `last_login_at`
+- `id`, `display_name`, `avatar_url`, `community` (`artlab` | `bms`), `is_admin` (bool), `created_at`, `last_login_at`
 
 **accounts**
 - `id`, `user_id`, `provider` (`discord` | `slack`), `provider_user_id`, `provider_team_or_guild_id`, `is_kiln_master` (bool, refreshed at login), tokens as required by auth library
@@ -220,12 +217,11 @@ Suggested tables (adjust naming to stack conventions). All timestamps stored in 
 **firings**
 - `id`, `kiln_id`, `proposed_by_user_id`
 - `firing_type` (`bisque` | `glaze` | `other` — from settings), `cone`, `title` (optional), `notes`
-- `scheduled_start` (timestamptz)
+- `scheduled_date` (date): the day the firing is booked for. **No start time is promised.** Times below are real moments, recorded as they happen.
 - `status` (enum from §6), `hold_reason`, `cancel_reason`
 - `proposer_description`, `proposer_share_pct`, `proposer_cone`, `proposer_clay_body`
 - `fullness_override_pct` (nullable)
 - `requests_close_at`, `requests_closed_manually` (bool)
-- `loader_user_id` (nullable; kiln master or a self-loader)
 - `program` (nullable text), `estimated_duration_minutes` (nullable), `started_at`, `estimated_unload_at`, `cooling_at`, `unloaded_at`, `ready_for_pickup_at`, `completed_at`
 - `underfilled_alert_sent_at`, `missed_start_reminder_sent_at`, `missed_unload_reminder_sent_at` (job idempotency)
 - `created_at`, `updated_at`
@@ -263,7 +259,7 @@ There are exactly **two physical QR codes**. Both are static URLs.
 ### A. Wheel QR → `/upcoming` (public)
 - No login required to view.
 - Lists firings in `proposed`, `on_hold`, `confirmed` (and optionally in-progress ones) for the next `public_page_days_ahead` days.
-- Each card: date/time, type, cone, status badge ("Proposed", "Waiting for more work", "Confirmed"), **room left %** with a bar, requests-close time, and participant count. Don't show participant names publicly — **[CONFIRM]**.
+- Each card: day (no time), type, cone, status badge ("Proposed", "Waiting for more work", "Confirmed"), **room left %** with a bar, requests-close time, and participant count. Don't show participant names publicly — **[CONFIRM]**.
 - "Request space" → login (if needed) → request form (§7) → back to the firing page.
 - "Propose a firing" button.
 - Link to the iCal feed.
@@ -271,8 +267,8 @@ There are exactly **two physical QR codes**. Both are static URLs.
 ### B. Kiln QR → `/kiln` (login required)
 1. If not logged in → login → return to `/kiln`.
 2. Determine the **relevant firing(s)**:
-   - Any firing in `loading`, `loaded`, `firing`, `cooling`, `unloaded`; plus
-   - `confirmed` firings whose `scheduled_start` is within ±24h.
+   - Any firing in `loading`, `loaded`, `firing`, `cooling`; plus
+   - `confirmed` firings whose scheduled day starts within ±24h.
    - If exactly one → go to it. If several → short pick list. If none → "No active firing" + link to schedule.
 3. Show the firing summary and **only the next valid action buttons for this user's role** (§4, §6). Large touch targets.
    - Kiln masters see a prominent **START FIRING** button when status is `loaded` (or `confirmed`/`loading` — skipping allowed).
@@ -281,7 +277,7 @@ There are exactly **two physical QR codes**. Both are static URLs.
    - **Loaded** — optional note.
    - **Start firing** — `program` (select from settings or free text) and `estimated_duration` (prefilled from program default) → shows computed estimated unload time before confirming.
    - **Cooling** — optional note.
-   - **Unloaded** — optional note.
+   - **Unloaded: ready for pickup** (completed) — optional note.
    - **Ready for pickup** — nothing required; warns that participants will be messaged.
 5. On confirm: transition, write `firing_events` with `source = kiln_qr`, enqueue notifications, show success with what got posted.
 6. Users without permission for an action see a clear message, e.g. "Only kiln masters can start the kiln."
@@ -299,8 +295,8 @@ Single tick every ~5 minutes. Each job is idempotent via the `*_sent_at` columns
 | **Close requests** | now ≥ `requests_close_at` and status ∈ {proposed, on_hold, confirmed} | Update the channel message ("Requests closed"). |
 | **Under-filled alert** | Requests just closed and fullness < 50% (**[CONFIRM]** threshold) and `underfilled_alert_sent_at` is null | DM kiln master(s): "Glaze firing Thu is at 30% and requests are closed." Link to firing page with quick actions: **run anyway (confirm)**, **postpone (reschedule)**, **reopen requests**, **cancel**. (Merge is a stretch goal — see §15.) No automatic decision. |
 | **Unconfirmed reminder** | status ∈ {proposed, on_hold} and `requests_close_at` passed | Include in the under-filled alert or send a separate "needs confirmation" DM to kiln masters. |
-| **Missed start** | status ∈ {confirmed, loading, loaded} and now > `scheduled_start` + `missed_start_grace_minutes` and reminder not sent | DM kiln master(s): "Thu glaze firing hasn't been marked started." |
-| **Missed unload** | status ∈ {firing, cooling} and now > `estimated_unload_at` + `missed_unload_grace_minutes` and reminder not sent | DM kiln master(s) / assigned loader. |
+| **Missed start** | status ∈ {confirmed, loading, loaded} and now > end of `scheduled_date` (local midnight) + `missed_start_grace_minutes` and reminder not sent | DM kiln master(s): "Thu glaze firing hasn't been marked started." |
+| **Missed unload** | status ∈ {firing, cooling} and now > `estimated_unload_at` + `missed_unload_grace_minutes` and reminder not sent | DM kiln master(s). |
 | **Outbox delivery** | `notification_outbox` rows pending and due | Send; on failure, exponential backoff, max ~8 attempts, then `failed`. |
 
 Who receives kiln-master DMs: all users currently flagged kiln master. **[CONFIRM]** whether there should be a single "on duty" kiln master per firing instead.
@@ -366,12 +362,12 @@ Even though billing/energy/maintenance are out of scope, make sure v1 records:
 ## 13. Other pages
 
 - **`/` (logged in)** — upcoming firings (same as `/upcoming` but with actions), "My firings" (proposed by me / I have work in), quick "Propose a firing".
-- **`/firings/new`** — propose form: type, cone, date/time, own description, own share %, clay body, notes. Enforces min notice (kiln masters can bypass).
-- **`/firings/:id`** — details, fullness bar, request list (kiln masters see full details + compatibility flags + approve/decline), timeline from `firing_events`, status action buttons for permitted users, kiln-master controls (confirm, hold w/ reason, release, reschedule, cancel w/ reason, override fullness, close/reopen requests, assign loader).
+- **`/firings/new`** — propose form: type, cone, day (no time), own description, own share %, clay body, notes. Enforces min notice (kiln masters can bypass).
+- **`/firings/:id`** — details, fullness bar, request list (kiln masters see full details + compatibility flags + approve/decline), timeline from `firing_events`, status action buttons for permitted users, kiln-master controls (confirm, hold w/ reason, release, reschedule, cancel w/ reason, override fullness, close/reopen requests).
 - **`/kiln`** — kiln QR flow (§9B).
 - **`/upcoming`** — public page (§9A).
 - **`/calendar.ics`** — public iCal feed of non-cancelled upcoming firings (title like "Cone 6 Glaze (75% full)").
-- **`/admin/users`** — kiln masters: toggle self-loader. Admin: toggle admin.
+- **`/admin/users`** — admins: toggle admin.
 - **`/admin/settings`** — admin: everything in `settings`, kiln dimensions.
 
 UI: mobile-first, high contrast, large tap targets. Studio hands may be dirty or gloved; keep forms short.
@@ -397,7 +393,6 @@ UI: mobile-first, high contrast, large tap targets. Studio hands may be dirty or
 - All status transitions with permissions and back-dating.
 - `/kiln` flow end-to-end on a phone, including the pick list case.
 - Start firing → program + duration → estimated unload time.
-- Self-loader management.
 
 **M3 — Notifications**
 - Discord + Slack main message created and edited in place.
@@ -416,7 +411,7 @@ UI: mobile-first, high contrast, large tap targets. Studio hands may be dirty or
 3. **Tue** — A BMS member (Slack) scans the wheel QR, logs in with Slack, requests 10% with cone 10 clay. Compatibility warning shows; kiln master declines with a note; member gets a Slack DM.
 4. **Wed 9pm** — Requests auto-close (cutoff 12h). Kiln master confirms and overrides fullness to 85%.
    - *Alternate:* if fullness were 30%, kiln master gets the under-filled DM, chooses **postpone** one week; all participants are notified.
-5. **Thu 8:45am** — Emily (self-loader, assigned loader) scans kiln QR → Loading → Loaded.
+5. **Thu 8:45am** — Emily scans kiln QR → Loading → Loaded.
 6. **Thu 9:15am** — Kiln master scans kiln QR → Start firing → selects program, duration 30h → posts "est. unload Fri 3:15pm". Emily attempting Start is refused.
 7. **Thu evening** — Kiln master marks Cooling (back-dated to 6pm).
 8. **Fri 3:30pm** — Unloaded → Ready for pickup. Cody, Annabelle, Emily each get a DM on their platform.

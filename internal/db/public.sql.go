@@ -12,17 +12,17 @@ import (
 
 const listPublicFirings = `-- name: ListPublicFirings :many
 
-SELECT f.id, f.kiln_id, f.proposed_by_user_id, f.firing_type, f.cone, f.title, f.notes, f.scheduled_start, f.status, f.was_confirmed, f.hold_reason, f.cancel_reason, f.proposer_description, f.proposer_share_pct, f.proposer_cone, f.proposer_clay_body, f.fullness_override_pct, f.requests_close_at, f.requests_closed_manually, f.loader_user_id, f.program, f.estimated_duration_minutes, f.started_at, f.estimated_unload_at, f.cooling_at, f.unloaded_at, f.ready_for_pickup_at, f.completed_at, f.underfilled_alert_sent_at, f.missed_start_reminder_sent_at, f.missed_unload_reminder_sent_at, f.created_at, f.updated_at, f.requests_close_handled_at,
+SELECT f.id, f.kiln_id, f.proposed_by_user_id, f.firing_type, f.cone, f.title, f.notes, f.status, f.was_confirmed, f.hold_reason, f.cancel_reason, f.proposer_description, f.proposer_share_pct, f.proposer_cone, f.proposer_clay_body, f.fullness_override_pct, f.requests_close_at, f.requests_closed_manually, f.program, f.estimated_duration_minutes, f.started_at, f.estimated_unload_at, f.cooling_at, f.unloaded_at, f.ready_for_pickup_at, f.completed_at, f.underfilled_alert_sent_at, f.missed_start_reminder_sent_at, f.missed_unload_reminder_sent_at, f.created_at, f.updated_at, f.requests_close_handled_at, f.scheduled_date,
        COALESCE((SELECT sum(r.estimated_share_pct) FROM firing_requests r
                  WHERE r.firing_id = f.id AND r.status = 'approved'), 0)::int AS approved_share_pct,
        (SELECT count(*) FROM firing_requests r
          WHERE r.firing_id = f.id AND r.status = 'approved')::int AS approved_count
 FROM firings f
 WHERE f.status::text = ANY ($1::text[])
-  AND f.scheduled_start <= $2
-  AND (f.scheduled_start >= $3
-       OR f.status IN ('loading', 'loaded', 'firing', 'cooling', 'unloaded'))
-ORDER BY f.scheduled_start, f.id
+  AND f.scheduled_date <= $2
+  AND (f.scheduled_date >= $3
+       OR f.status IN ('loading', 'loaded', 'firing', 'cooling'))
+ORDER BY f.scheduled_date, f.id
 `
 
 type ListPublicFiringsParams struct {
@@ -57,7 +57,6 @@ func (q *Queries) ListPublicFirings(ctx context.Context, arg ListPublicFiringsPa
 			&i.Firing.Cone,
 			&i.Firing.Title,
 			&i.Firing.Notes,
-			&i.Firing.ScheduledStart,
 			&i.Firing.Status,
 			&i.Firing.WasConfirmed,
 			&i.Firing.HoldReason,
@@ -69,7 +68,6 @@ func (q *Queries) ListPublicFirings(ctx context.Context, arg ListPublicFiringsPa
 			&i.Firing.FullnessOverridePct,
 			&i.Firing.RequestsCloseAt,
 			&i.Firing.RequestsClosedManually,
-			&i.Firing.LoaderUserID,
 			&i.Firing.Program,
 			&i.Firing.EstimatedDurationMinutes,
 			&i.Firing.StartedAt,
@@ -84,6 +82,7 @@ func (q *Queries) ListPublicFirings(ctx context.Context, arg ListPublicFiringsPa
 			&i.Firing.CreatedAt,
 			&i.Firing.UpdatedAt,
 			&i.Firing.RequestsCloseHandledAt,
+			&i.Firing.ScheduledDate,
 			&i.ApprovedSharePct,
 			&i.ApprovedCount,
 		); err != nil {

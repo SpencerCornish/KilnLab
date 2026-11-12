@@ -30,7 +30,7 @@ make setup           # creates .env (DEV_LOGIN=true) and installs web deps
 make dev             # Postgres on :5433, API on :8080, Vite on :5173
 ```
 
-Run `make seed` once for sample firings. With `NOTIFICATIONS_DRY_RUN=true` (the default in `.env.example`), Discord and Slack messages are written to the server log instead of being sent; admins can also see them on `/admin`. With `DEV_LOGIN=true`, sign in as one of the seeded users (Kim the kiln master, Sam the self-loader, Alice, Bob on BMS, Carol) by typing their name.
+Run `make seed` once for sample firings. With `NOTIFICATIONS_DRY_RUN=true` (the default in `.env.example`), Discord and Slack messages are written to the server log instead of being sent; admins can also see them on `/admin`. With `DEV_LOGIN=true`, sign in as one of the seeded users (Kim the kiln master, Sam, Alice, Bob on BMS, Carol) by typing their name.
 The login page shows a form for signing in as any fake user and role, with no Discord or Slack app needed.
 To test real OAuth through Vite, set `APP_BASE_URL=http://localhost:5173` so the callbacks come back via the Vite proxy.
 

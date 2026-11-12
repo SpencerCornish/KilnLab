@@ -15,27 +15,25 @@ import (
 type Status = db.FiringStatus
 
 const (
-	Proposed       = db.FiringStatusProposed
-	OnHold         = db.FiringStatusOnHold
-	Confirmed      = db.FiringStatusConfirmed
-	Loading        = db.FiringStatusLoading
-	Loaded         = db.FiringStatusLoaded
-	Firing         = db.FiringStatusFiring
-	Cooling        = db.FiringStatusCooling
-	Unloaded       = db.FiringStatusUnloaded
-	ReadyForPickup = db.FiringStatusReadyForPickup
-	Completed      = db.FiringStatusCompleted
-	Cancelled      = db.FiringStatusCancelled
+	Proposed  = db.FiringStatusProposed
+	OnHold    = db.FiringStatusOnHold
+	Confirmed = db.FiringStatusConfirmed
+	Loading   = db.FiringStatusLoading
+	Loaded    = db.FiringStatusLoaded
+	Firing    = db.FiringStatusFiring
+	Cooling   = db.FiringStatusCooling
+	Completed = db.FiringStatusCompleted // unloaded, ready for pickup and done in one step
+	Cancelled = db.FiringStatusCancelled
 )
 
 // AllStatuses in display order.
 var AllStatuses = []Status{
-	Proposed, OnHold, Confirmed, Loading, Loaded, Firing, Cooling, Unloaded, ReadyForPickup, Completed, Cancelled,
+	Proposed, OnHold, Confirmed, Loading, Loaded, Firing, Cooling, Completed, Cancelled,
 }
 
 // lifecycle is the forward path once a firing is confirmed. Kiln masters may
 // skip ahead along it (e.g. confirmed → firing when nobody scanned loading).
-var lifecycle = []Status{Confirmed, Loading, Loaded, Firing, Cooling, Unloaded, ReadyForPickup, Completed}
+var lifecycle = []Status{Confirmed, Loading, Loaded, Firing, Cooling, Completed}
 
 // Statuses in which the firing can still be rescheduled, held, confirmed etc.
 var (
@@ -44,8 +42,9 @@ var (
 	cancellable   = []Status{Proposed, OnHold, Confirmed, Loading, Loaded}
 	// Before the kiln starts, requests can still be approved/declined.
 	decidable = []Status{Proposed, OnHold, Confirmed, Loading, Loaded}
-	// Targets an assigned self-loader may move to.
-	loaderTargets = []Status{Loading, Loaded, Unloaded}
+	// Anyone signed in may move a firing to these: they say they've loaded or
+	// unloaded their work. Everything else is kiln masters only.
+	memberTargets = []Status{Loading, Loaded, Completed}
 )
 
 var (
@@ -57,8 +56,7 @@ var (
 
 // Actor is who is attempting an action on a particular firing.
 type Actor struct {
-	Roles    policy.Roles
-	IsLoader bool // assigned as this firing's loader
+	Roles policy.Roles
 }
 
 // State is the part of a firing the state machine needs.
@@ -126,7 +124,7 @@ func Cancel(s State, a Actor) (Status, error) {
 	return Cancelled, nil
 }
 
-// Reschedule changes scheduled_start; the status is unchanged.
+// Reschedule changes scheduled_date; the status is unchanged.
 func Reschedule(s State, a Actor) error {
 	if err := requireManager(a); err != nil {
 		return err
@@ -141,13 +139,14 @@ func Reschedule(s State, a Actor) error {
 func CanDecideRequests(s Status) bool { return slices.Contains(decidable, s) }
 
 // IsActive reports whether management edits that don't change the status
-// (fullness override, requests window, loader) are still possible.
+// (fullness override, requests window) are still possible.
 func IsActive(s Status) bool { return s != Completed && s != Cancelled }
 
 // Advance moves a firing forward along the lifecycle (loading … completed).
+// Completed is the unload step: the firing is unloaded and ready for pickup.
 //   - Kiln masters may skip intermediate statuses.
-//   - An assigned self-loader may only move to loading, loaded or unloaded,
-//     and never into firing (not even by skipping).
+//   - Anyone may move a firing to loading, loaded or completed, but never past
+//     the kiln start (not even by skipping).
 //   - Only kiln masters start the kiln.
 func Advance(s State, to Status, a Actor) error {
 	fromIdx := slices.Index(lifecycle, s.Status)
@@ -157,11 +156,11 @@ func Advance(s State, to Status, a Actor) error {
 	}
 
 	manager := a.Roles.CanManageFirings()
-	loader := a.IsLoader && a.Roles.SelfLoader && slices.Contains(loaderTargets, to)
+	member := slices.Contains(memberTargets, to)
 	if to == Firing && !a.Roles.CanStartFiring() {
 		return fmt.Errorf("%w: only kiln masters can start the kiln", ErrForbidden)
 	}
-	if !manager && !loader {
+	if !manager && !member {
 		return fmt.Errorf("%w: you can't mark this firing %s", ErrForbidden, Label(to))
 	}
 
@@ -169,7 +168,7 @@ func Advance(s State, to Status, a Actor) error {
 		return fmt.Errorf("%w: can't go from %s to %s", ErrInvalidTransition, Label(s.Status), Label(to))
 	}
 	if !manager {
-		// Self-loaders can skip a step (e.g. confirmed → loaded) but never past the kiln start.
+		// Anyone can skip a step (e.g. confirmed → loaded) but never past the kiln start.
 		firingIdx := slices.Index(lifecycle, Firing)
 		if fromIdx < firingIdx && toIdx > firingIdx {
 			return fmt.Errorf("%w: only kiln masters can start the kiln", ErrForbidden)
@@ -183,8 +182,6 @@ func Label(s Status) string {
 	switch s {
 	case OnHold:
 		return "on hold"
-	case ReadyForPickup:
-		return "ready for pickup"
 	default:
 		return string(s)
 	}

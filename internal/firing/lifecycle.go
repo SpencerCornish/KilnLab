@@ -36,18 +36,15 @@ func BlockedReason(s State, a Actor) string {
 	if len(NextSteps(s, a)) > 0 || !slices.Contains(lifecycle[:len(lifecycle)-1], s.Status) {
 		return ""
 	}
-	if s.Status == Loaded || (a.IsLoader && a.Roles.SelfLoader && s.Status == Loading) {
+	if s.Status == Loaded {
 		return "Only kiln masters can start the kiln."
 	}
-	if a.IsLoader && a.Roles.SelfLoader {
-		return "A kiln master needs to do the next step."
-	}
-	return "Only kiln masters and the assigned loader can update this firing."
+	return ""
 }
 
 // ── Relevant firings for the kiln QR (§9B step 2) ───────────────────────────
 
-var inProgress = []Status{Loading, Loaded, Firing, Cooling, Unloaded}
+var inProgress = []Status{Loading, Loaded, Firing, Cooling}
 
 // KilnRelevanceWindow: confirmed firings this close to their start count.
 const KilnRelevanceWindow = 24 * time.Hour
@@ -66,7 +63,9 @@ func RelevantAtKiln(status Status, start, now time.Time) bool {
 
 // ── Timestamps & back-dating (§6, §12) ──────────────────────────────────────
 
-// Timestamps are a firing's lifecycle times, in order.
+// Timestamps are a firing's lifecycle times, in order. Completed is the unload
+// step, so unloaded, ready for pickup and completed share one instant: setting
+// UnloadedAt sets all three (see With).
 type Timestamps struct {
 	StartedAt, CoolingAt, UnloadedAt, ReadyForPickupAt, CompletedAt *time.Time
 }
@@ -79,32 +78,33 @@ func TimestampField(to Status) string {
 		return "started_at"
 	case Cooling:
 		return "cooling_at"
-	case Unloaded:
-		return "unloaded_at"
-	case ReadyForPickup:
-		return "ready_for_pickup_at"
 	case Completed:
-		return "completed_at"
+		return "unloaded_at"
 	}
 	return ""
 }
 
-// CorrectableFields in lifecycle order.
-var CorrectableFields = []string{"started_at", "cooling_at", "unloaded_at", "ready_for_pickup_at", "completed_at"}
+// CorrectableFields in lifecycle order. ready_for_pickup_at and completed_at
+// follow unloaded_at, so they aren't corrected separately.
+var CorrectableFields = []string{"started_at", "cooling_at", "unloaded_at"}
+
+// timestampNames matches ordered() one to one.
+var timestampNames = []string{"started_at", "cooling_at", "unloaded_at", "ready_for_pickup_at", "completed_at"}
 
 func (t Timestamps) ordered() []*time.Time {
 	return []*time.Time{t.StartedAt, t.CoolingAt, t.UnloadedAt, t.ReadyForPickupAt, t.CompletedAt}
 }
 
-// Get returns the timestamp for a field name.
+// Get returns the timestamp for a correctable field name.
 func (t Timestamps) Get(field string) *time.Time {
-	if i := slices.Index(CorrectableFields, field); i >= 0 {
-		return t.ordered()[i]
+	if !slices.Contains(CorrectableFields, field) {
+		return nil
 	}
-	return nil
+	return t.ordered()[slices.Index(timestampNames, field)]
 }
 
-// With returns a copy with field set to at.
+// With returns a copy with field set to at. Setting unloaded_at also sets
+// ready_for_pickup_at and completed_at, since they're the same step.
 func (t Timestamps) With(field string, at time.Time) Timestamps {
 	switch field {
 	case "started_at":
@@ -112,11 +112,7 @@ func (t Timestamps) With(field string, at time.Time) Timestamps {
 	case "cooling_at":
 		t.CoolingAt = &at
 	case "unloaded_at":
-		t.UnloadedAt = &at
-	case "ready_for_pickup_at":
-		t.ReadyForPickupAt = &at
-	case "completed_at":
-		t.CompletedAt = &at
+		t.UnloadedAt, t.ReadyForPickupAt, t.CompletedAt = &at, &at, &at
 	}
 	return t
 }
@@ -141,9 +137,9 @@ func (t Timestamps) CheckOrder() error {
 			continue
 		}
 		if prev != nil && ts.Before(*prev) {
-			return fmt.Errorf("%s can't be before %s", fieldLabel(CorrectableFields[i]), fieldLabel(prevName))
+			return fmt.Errorf("%s can't be before %s", fieldLabel(timestampNames[i]), fieldLabel(prevName))
 		}
-		prev, prevName = ts, CorrectableFields[i]
+		prev, prevName = ts, timestampNames[i]
 	}
 	return nil
 }
@@ -151,7 +147,7 @@ func (t Timestamps) CheckOrder() error {
 func fieldLabel(f string) string {
 	return map[string]string{
 		"started_at": "started", "cooling_at": "cooling", "unloaded_at": "unloaded",
-		"ready_for_pickup_at": "ready for pickup", "completed_at": "completed",
+		"ready_for_pickup_at": "unloaded", "completed_at": "unloaded",
 	}[f]
 }
 

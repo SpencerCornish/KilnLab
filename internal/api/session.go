@@ -65,7 +65,7 @@ func (s *Server) rolesFor(ctx context.Context, q *db.Queries, u db.User) (policy
 	if err != nil {
 		return policy.Roles{}, err
 	}
-	return policy.Roles{SelfLoader: u.IsSelfLoader, KilnMaster: km, Admin: u.IsAdmin}, nil
+	return policy.Roles{KilnMaster: km, Admin: u.IsAdmin}, nil
 }
 
 func (s *Server) requireUser(next http.Handler) http.Handler {

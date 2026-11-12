@@ -80,7 +80,7 @@ func (s *Server) handleAdvance(w http.ResponseWriter, r *http.Request) {
 		if !in.To.Valid() {
 			return nil, badRequest("unknown status")
 		}
-		if err := firing.Advance(stateOf(f), in.To, actorFor(f, u)); err != nil {
+		if err := firing.Advance(stateOf(f), in.To, actorFor(u)); err != nil {
 			return nil, err
 		}
 		source := db.EventSourceWeb
@@ -126,12 +126,9 @@ func (s *Server) handleAdvance(w http.ResponseWriter, r *http.Request) {
 			eventNote = &n
 		case firing.Cooling:
 			p.CoolingAt = &at
-		case firing.Unloaded:
-			p.UnloadedAt = &at
-		case firing.ReadyForPickup:
-			p.ReadyForPickupAt = &at
 		case firing.Completed:
-			p.CompletedAt = &at
+			// Unloaded, ready for pickup and completed are one step.
+			p.UnloadedAt, p.ReadyForPickupAt, p.CompletedAt = &at, &at, &at
 		}
 		if eventNote == nil {
 			eventNote = note
@@ -144,7 +141,7 @@ func (s *Server) handleAdvance(w http.ResponseWriter, r *http.Request) {
 		switch in.To {
 		case firing.Firing:
 			n.ThreadReply(notify.ThreadStarted(updated, loc))
-		case firing.ReadyForPickup:
+		case firing.Completed:
 			n.ThreadReply(notify.ThreadReady())
 			ids, err := q.ListParticipants(ctx, db.ListParticipantsParams{FiringID: f.ID, Statuses: []string{string(db.RequestStatusApproved)}})
 			if err != nil {
@@ -182,7 +179,7 @@ func formatDuration(min int32) string {
 // ── Correcting timestamps after the fact ────────────────────────────────────
 
 type correctInput struct {
-	Field string    `json:"field"` // started_at | cooling_at | unloaded_at | ready_for_pickup_at | completed_at
+	Field string    `json:"field"` // started_at | cooling_at | unloaded_at
 	At    time.Time `json:"at"`
 }
 
@@ -232,7 +229,6 @@ func (s *Server) handleCorrectTimestamp(w http.ResponseWriter, r *http.Request) 
 
 var fieldNames = map[string]string{
 	"started_at": "start", "cooling_at": "cooling", "unloaded_at": "unloaded",
-	"ready_for_pickup_at": "ready for pickup", "completed_at": "completed",
 }
 
 func (s *Server) studioLocation(ctx context.Context, q *db.Queries) *time.Location {
@@ -250,14 +246,14 @@ func (s *Server) studioLocation(ctx context.Context, q *db.Queries) *time.Locati
 // ── Kiln QR (§9B) ───────────────────────────────────────────────────────────
 
 type kilnFiringDTO struct {
-	ID             int64           `json:"id"`
-	KilnID         int64           `json:"kiln_id"`
-	Title          *string         `json:"title"`
-	FiringType     string          `json:"firing_type"`
-	Cone           string          `json:"cone"`
-	ScheduledStart time.Time       `json:"scheduled_start"`
-	Status         db.FiringStatus `json:"status"`
-	ProposerName   string          `json:"proposer_name"`
+	ID            int64           `json:"id"`
+	KilnID        int64           `json:"kiln_id"`
+	Title         *string         `json:"title"`
+	FiringType    string          `json:"firing_type"`
+	Cone          string          `json:"cone"`
+	ScheduledDate Day             `json:"scheduled_date"`
+	Status        db.FiringStatus `json:"status"`
+	ProposerName  string          `json:"proposer_name"`
 }
 
 type kilnViewDTO struct {
@@ -287,8 +283,10 @@ func (s *Server) handleKiln(w http.ResponseWriter, r *http.Request) {
 		out.Kiln, kilnID = &dto, id
 	}
 	now := s.now()
+	loc := s.studioLocation(ctx, s.queries)
 	rows, err := s.queries.ListKilnCandidates(ctx, db.ListKilnCandidatesParams{
-		KilnID: kilnID, WindowStart: now.Add(-firing.KilnRelevanceWindow), WindowEnd: now.Add(firing.KilnRelevanceWindow),
+		KilnID: kilnID, WindowStart: firing.DayOf(now.Add(-firing.KilnRelevanceWindow-24*time.Hour), loc),
+		WindowEnd: firing.DayOf(now.Add(firing.KilnRelevanceWindow+24*time.Hour), loc),
 	})
 	if err != nil {
 		s.fail(w, r, err)
@@ -297,11 +295,11 @@ func (s *Server) handleKiln(w http.ResponseWriter, r *http.Request) {
 	out.Firings = []kilnFiringDTO{}
 	for _, row := range rows {
 		f := row.Firing
-		if !firing.RelevantAtKiln(f.Status, f.ScheduledStart, now) {
+		if !firing.RelevantAtKiln(f.Status, firing.DayStart(f.ScheduledDate, loc), now) {
 			continue
 		}
 		out.Firings = append(out.Firings, kilnFiringDTO{ID: f.ID, KilnID: f.KilnID, Title: f.Title,
-			FiringType: f.FiringType, Cone: f.Cone, ScheduledStart: f.ScheduledStart, Status: f.Status,
+			FiringType: f.FiringType, Cone: f.Cone, ScheduledDate: Day(f.ScheduledDate), Status: f.Status,
 			ProposerName: row.ProposerName})
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -315,15 +313,14 @@ type adminUserDTO struct {
 	AvatarURL    *string         `json:"avatar_url"`
 	Community    db.Community    `json:"community"`
 	Provider     db.AuthProvider `json:"provider"`
-	IsSelfLoader bool            `json:"is_self_loader"`
 	IsKilnMaster bool            `json:"is_kiln_master"`
 	IsAdmin      bool            `json:"is_admin"`
 	LastLoginAt  time.Time       `json:"last_login_at"`
 }
 
 func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
-	if !userFromContext(r.Context()).Roles.CanManageSelfLoaders() {
-		s.fail(w, r, forbidden("only kiln masters can manage people"))
+	if !userFromContext(r.Context()).Roles.CanEditSettings() {
+		s.fail(w, r, forbidden("only admins can manage people"))
 		return
 	}
 	rows, err := s.queries.ListUsers(r.Context())
@@ -334,15 +331,14 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 	out := make([]adminUserDTO, 0, len(rows))
 	for _, u := range rows {
 		out = append(out, adminUserDTO{ID: u.ID, DisplayName: u.DisplayName, AvatarURL: u.AvatarUrl,
-			Community: u.Community, Provider: u.Provider, IsSelfLoader: u.IsSelfLoader,
+			Community: u.Community, Provider: u.Provider,
 			IsKilnMaster: u.IsKilnMaster, IsAdmin: u.IsAdmin, LastLoginAt: u.LastLoginAt})
 	}
 	writeJSON(w, http.StatusOK, out)
 }
 
 type updateUserInput struct {
-	SelfLoader *bool `json:"self_loader"`
-	Admin      *bool `json:"admin"`
+	Admin *bool `json:"admin"`
 }
 
 func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
@@ -356,9 +352,6 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if in.SelfLoader != nil && !me.Roles.CanManageSelfLoaders() {
-			return forbidden("only kiln masters can change self-loaders")
-		}
 		if in.Admin != nil {
 			if !me.Roles.CanEditSettings() {
 				return forbidden("only admins can change admins")
@@ -370,11 +363,6 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		return db.InTx(r.Context(), s.pool, func(q *db.Queries) error {
 			if _, err := q.GetUser(r.Context(), id); err != nil {
 				return err
-			}
-			if in.SelfLoader != nil {
-				if _, err := q.SetUserSelfLoader(r.Context(), db.SetUserSelfLoaderParams{ID: id, IsSelfLoader: *in.SelfLoader}); err != nil {
-					return err
-				}
 			}
 			if in.Admin != nil {
 				if _, err := q.SetUserAdmin(r.Context(), db.SetUserAdminParams{ID: id, IsAdmin: *in.Admin}); err != nil {

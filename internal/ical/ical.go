@@ -16,6 +16,7 @@ type Event struct {
 	URL         string
 	Location    string
 	Start, End  time.Time
+	AllDay      bool // Start and End are calendar dates (End exclusive), not instants
 	Modified    time.Time
 	Tentative   bool // STATUS:TENTATIVE instead of CONFIRMED
 }
@@ -78,8 +79,13 @@ func Write(w io.Writer, c Calendar) error {
 		line("UID", e.UID)
 		line("DTSTAMP", utc(e.Modified))
 		line("LAST-MODIFIED", utc(e.Modified))
-		line("DTSTART", utc(e.Start))
-		line("DTEND", utc(e.End))
+		if e.AllDay {
+			line("DTSTART;VALUE=DATE", e.Start.Format("20060102"))
+			line("DTEND;VALUE=DATE", e.End.Format("20060102"))
+		} else {
+			line("DTSTART", utc(e.Start))
+			line("DTEND", utc(e.End))
+		}
 		line("SUMMARY", escape(e.Summary))
 		if e.Description != "" {
 			line("DESCRIPTION", escape(e.Description))

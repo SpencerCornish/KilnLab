@@ -5,8 +5,5 @@ SELECT u.*,
 FROM users u
 ORDER BY lower(u.display_name), u.id;
 
--- name: SetUserSelfLoader :one
-UPDATE users SET is_self_loader = $2 WHERE id = $1 RETURNING *;
-
 -- name: SetUserAdmin :one
 UPDATE users SET is_admin = $2 WHERE id = $1 RETURNING *;

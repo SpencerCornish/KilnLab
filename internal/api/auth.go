@@ -229,7 +229,6 @@ type devLoginRequest struct {
 	Name       string `json:"name"`
 	Community  string `json:"community"`
 	KilnMaster bool   `json:"kiln_master"`
-	SelfLoader bool   `json:"self_loader"`
 	Admin      bool   `json:"admin"`
 }
 
@@ -265,11 +264,11 @@ func (s *Server) handleDevLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	err := s.signIn(r.Context(), w, ident)
 	if err == nil {
-		// Dev login can also set the flags normally managed in-app.
+		// Dev login can also set the admin flag, which is normally managed in-app.
 		_, err = s.pool.Exec(r.Context(),
-			`UPDATE users SET is_self_loader = $2, is_admin = $3
-			 WHERE id = (SELECT user_id FROM accounts WHERE provider = $1::auth_provider AND provider_user_id = $4)`,
-			provider, req.SelfLoader, req.Admin, ident.ProviderUserID)
+			`UPDATE users SET is_admin = $3
+			 WHERE id = (SELECT user_id FROM accounts WHERE provider = $1::auth_provider AND provider_user_id = $2)`,
+			provider, ident.ProviderUserID, req.Admin)
 	}
 	if err != nil {
 		s.writeError(w, r, http.StatusInternalServerError, "dev login failed", err)

@@ -18,20 +18,16 @@ func TestNextSteps(t *testing.T) {
 		{"KM loading: loaded or start", Loading, kilnMaster, []Status{Loaded, Firing}},
 		{"KM loaded: start", Loaded, kilnMaster, []Status{Firing}},
 		{"KM firing", Firing, kilnMaster, []Status{Cooling}},
-		{"KM cooling", Cooling, kilnMaster, []Status{Unloaded}},
-		{"KM unloaded", Unloaded, kilnMaster, []Status{ReadyForPickup}},
-		{"KM ready", ReadyForPickup, kilnMaster, []Status{Completed}},
+		{"KM cooling", Cooling, kilnMaster, []Status{Completed}},
 		{"KM completed", Completed, kilnMaster, nil},
 		{"KM proposed (confirm first)", Proposed, kilnMaster, nil},
 		{"admin loaded", Loaded, admin, []Status{Firing}},
-		{"loader confirmed", Confirmed, loader, []Status{Loading}},
-		{"loader loading", Loading, loader, []Status{Loaded}},
-		{"loader loaded", Loaded, loader, nil},
-		{"loader firing: skip cooling", Firing, loader, []Status{Unloaded}},
-		{"loader cooling", Cooling, loader, []Status{Unloaded}},
-		{"loader unloaded", Unloaded, loader, nil},
-		{"member", Confirmed, member, nil},
-		{"unassigned self-loader", Confirmed, selfLoader, nil},
+		{"member confirmed", Confirmed, member, []Status{Loading}},
+		{"member loading", Loading, member, []Status{Loaded}},
+		{"member loaded", Loaded, member, nil},
+		{"member firing: skip cooling", Firing, member, []Status{Completed}},
+		{"member cooling", Cooling, member, []Status{Completed}},
+		{"member completed", Completed, member, nil},
 	}
 	for _, c := range cases {
 		got := NextSteps(State{Status: c.from}, c.a)
@@ -48,14 +44,11 @@ func TestNextSteps(t *testing.T) {
 }
 
 func TestBlockedReason(t *testing.T) {
-	if r := BlockedReason(State{Status: Loaded}, loader); r != "Only kiln masters can start the kiln." {
-		t.Errorf("loader at loaded: %q", r)
+	if r := BlockedReason(State{Status: Loaded}, member); r != "Only kiln masters can start the kiln." {
+		t.Errorf("member at loaded: %q", r)
 	}
-	if r := BlockedReason(State{Status: Unloaded}, loader); r != "A kiln master needs to do the next step." {
-		t.Errorf("loader at unloaded: %q", r)
-	}
-	if r := BlockedReason(State{Status: Confirmed}, member); r == "" {
-		t.Error("member should get a reason")
+	if r := BlockedReason(State{Status: Confirmed}, member); r != "" {
+		t.Errorf("member can load a confirmed firing, got reason %q", r)
 	}
 	if r := BlockedReason(State{Status: Confirmed}, kilnMaster); r != "" {
 		t.Errorf("KM has actions, got %q", r)
@@ -71,7 +64,7 @@ func TestRelevantAtKiln(t *testing.T) {
 	now := t0
 	for _, s := range AllStatuses {
 		got := RelevantAtKiln(s, now.Add(72*time.Hour), now)
-		want := slices.Contains([]Status{Loading, Loaded, Firing, Cooling, Unloaded}, s)
+		want := slices.Contains([]Status{Loading, Loaded, Firing, Cooling}, s)
 		if got != want {
 			t.Errorf("%s far from start: %v", s, got)
 		}
@@ -94,7 +87,7 @@ func TestRelevantAtKiln(t *testing.T) {
 func TestTimestampField(t *testing.T) {
 	for _, s := range AllStatuses {
 		f := TimestampField(s)
-		if (f != "") != slices.Contains([]Status{Firing, Cooling, Unloaded, ReadyForPickup, Completed}, s) {
+		if (f != "") != slices.Contains([]Status{Firing, Cooling, Completed}, s) {
 			t.Errorf("%s → %q", s, f)
 		}
 		if f != "" && !slices.Contains(CorrectableFields, f) {

@@ -6,7 +6,7 @@ SELECT id FROM firings
 WHERE (status IN ('proposed', 'on_hold', 'confirmed') AND requests_close_handled_at IS NULL
        AND (requests_close_at <= sqlc.arg(now) OR requests_closed_manually))
    OR (status IN ('confirmed', 'loading', 'loaded') AND missed_start_reminder_sent_at IS NULL
-       AND scheduled_start <= sqlc.arg(now))
+       AND scheduled_date <= sqlc.arg(today))
    OR (status IN ('firing', 'cooling') AND missed_unload_reminder_sent_at IS NULL
        AND estimated_unload_at <= sqlc.arg(now))
 ORDER BY id;

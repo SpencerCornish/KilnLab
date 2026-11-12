@@ -84,7 +84,6 @@ function DevLoginForm({ returnTo }: { returnTo: string }) {
   const [name, setName] = useState('Cody')
   const [community, setCommunity] = useState<'artlab' | 'bms'>('artlab')
   const [kilnMaster, setKilnMaster] = useState(false)
-  const [selfLoader, setSelfLoader] = useState(false)
   const [admin, setAdmin] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -94,7 +93,7 @@ function DevLoginForm({ returnTo }: { returnTo: string }) {
     setBusy(true)
     setErr(null)
     try {
-      await devLogin({ name, community, kiln_master: kilnMaster, self_loader: selfLoader, admin })
+      await devLogin({ name, community, kiln_master: kilnMaster, admin })
       await refresh()
       navigate(returnTo, { replace: true })
     } catch (e) {
@@ -137,7 +136,6 @@ function DevLoginForm({ returnTo }: { returnTo: string }) {
       </div>
       <div className="space-y-2">
         <Check label="Kiln master" checked={kilnMaster} onChange={setKilnMaster} disabled={community === 'bms'} />
-        <Check label="Self-loader" checked={selfLoader} onChange={setSelfLoader} />
         <Check label="Admin" checked={admin} onChange={setAdmin} />
       </div>
       {err && <p className="text-sm text-red-700">{err}</p>}

@@ -11,7 +11,7 @@ import (
 
 var requestsOpenStatuses = []Status{Proposed, OnHold, Confirmed}
 
-// RequestsCloseAt = scheduled_start − cutoff.
+// RequestsCloseAt = the scheduled day's start − cutoff (see DayStart).
 func RequestsCloseAt(start time.Time, cutoffHours int32) time.Time {
 	return start.Add(-time.Duration(cutoffHours) * time.Hour)
 }

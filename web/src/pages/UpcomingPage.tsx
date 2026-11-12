@@ -3,7 +3,7 @@ import { Link } from 'react-router'
 import { Alert, firingTitle, FullnessBar, STATUS_LABELS } from '../components/firing'
 import { getUpcoming } from '../lib/api'
 import { PageSpinner, useSession } from '../lib/session'
-import { formatDay, formatWhen } from '../lib/time'
+import { dayParts, formatWhen } from '../lib/time'
 import type { FiringStatus, PublicFiring } from '../lib/types'
 import { useLoad } from '../lib/useLoad'
 
@@ -68,7 +68,7 @@ export default function UpcomingPage() {
 }
 
 function PublicFiringCard({ firing: f, tz }: { firing: PublicFiring; tz: string }) {
-  const d = formatDay(f.scheduled_start, tz)
+  const d = dayParts(f.scheduled_date)
   const inKiln = IN_KILN.has(f.status)
   const people = `${f.participant_count} ${f.participant_count === 1 ? 'participant' : 'participants'}`
   return (
@@ -82,8 +82,7 @@ function PublicFiringCard({ firing: f, tz }: { firing: PublicFiring; tz: string 
         <div className="min-w-0 flex-1 space-y-1">
           <h2 className="text-lg font-bold">{firingTitle(f)}</h2>
           <p className="text-sm text-stone-600">
-            {d.time}
-            {f.kiln_name && ` · ${f.kiln_name}`} · {people}
+            {f.kiln_name && `${f.kiln_name} · `}{people}
           </p>
           <span
             className={`inline-block rounded-full px-2.5 py-0.5 text-sm font-semibold ${

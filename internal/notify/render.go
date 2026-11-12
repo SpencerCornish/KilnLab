@@ -59,9 +59,9 @@ func Title(f db.Firing) string {
 	return fmt.Sprintf("Cone %s %s", f.Cone, t)
 }
 
-// Describe is "Cone 6 Glaze (Thu Nov 13, 9:00am)", for DMs.
+// Describe is "Cone 6 Glaze (Thu Nov 13)", for DMs. Firings are booked by day.
 func Describe(f db.Firing, loc *time.Location) string {
-	return fmt.Sprintf("%s (%s)", Title(f), f.ScheduledStart.In(loc).Format(whenLayout))
+	return fmt.Sprintf("%s (%s)", Title(f), firing.DayLabel(f.ScheduledDate))
 }
 
 // FiringURL links to the firing page.
@@ -72,7 +72,7 @@ func FiringURL(baseURL string, id int64) string {
 var statusColors = map[db.FiringStatus]int{
 	firing.Proposed: 0x0284c7, firing.OnHold: 0xd97706, firing.Confirmed: 0x15803d,
 	firing.Loading: 0x4f46e5, firing.Loaded: 0x4f46e5, firing.Firing: 0xdc2626, firing.Cooling: 0x2563eb,
-	firing.Unloaded: 0x0d9488, firing.ReadyForPickup: 0x0d9488, firing.Completed: 0x78716c, firing.Cancelled: 0xa8a29e,
+	firing.Completed: 0x0d9488, firing.Cancelled: 0xa8a29e,
 }
 
 // RenderCard builds the main message (§11 "Main message content").
@@ -80,7 +80,7 @@ func RenderCard(in CardInput) Card {
 	f := in.Firing
 	loc := in.Loc
 	c := Card{
-		Title: fmt.Sprintf("🔥 %s — %s", Title(f), f.ScheduledStart.In(loc).Format(whenLayout)),
+		Title: fmt.Sprintf("🔥 %s — %s", Title(f), firing.DayLabel(f.ScheduledDate)),
 		URL:   FiringURL(in.BaseURL, f.ID),
 		Color: statusColors[f.Status],
 	}
@@ -107,10 +107,8 @@ func RenderCard(in CardInput) Card {
 			line += " · est. unload " + f.EstimatedUnloadAt.In(loc).Format("Mon 3:04pm")
 		}
 		c.Lines = append(c.Lines, line)
-	case firing.ReadyForPickup:
-		c.Lines = append(c.Lines, "✅ Ready for pickup")
 	case firing.Completed:
-		c.Lines = append(c.Lines, "Done")
+		c.Lines = append(c.Lines, "✅ Ready for pickup")
 	case firing.Cancelled:
 		reason := ""
 		if f.CancelReason != nil {

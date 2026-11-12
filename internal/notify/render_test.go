@@ -14,7 +14,7 @@ var denver, _ = time.LoadLocation("America/Denver")
 func sampleFiring() db.Firing {
 	start := time.Date(2026, 11, 12, 16, 0, 0, 0, time.UTC) // Thu 9:00am Denver
 	return db.Firing{
-		ID: 7, FiringType: "glaze", Cone: "6", ScheduledStart: start, Status: firing.Proposed,
+		ID: 7, FiringType: "glaze", Cone: "6", ScheduledDate: time.Date(2026, 11, 12, 0, 0, 0, 0, time.UTC), Status: firing.Proposed,
 		ProposerSharePct: 30, RequestsCloseAt: start.Add(-12 * time.Hour),
 	}
 }
@@ -26,13 +26,13 @@ func render(f db.Firing, approved int, full firing.Fullness, now time.Time) Card
 
 func TestRenderProposed(t *testing.T) {
 	f := sampleFiring()
-	c := render(f, 2, firing.Fullness{Display: 75, RoomLeft: 25}, f.ScheduledStart.Add(-48*time.Hour))
+	c := render(f, 2, firing.Fullness{Display: 75, RoomLeft: 25}, f.RequestsCloseAt.Add(12*time.Hour).Add(-48*time.Hour))
 	want := []string{
 		"Status: Proposed · ~75% full · room for ~25%",
 		"Proposed by Cody · 3 participants",
 		"Requests close Wed Nov 11, 9:00pm",
 	}
-	if c.Title != "🔥 Cone 6 Glaze — Thu Nov 12, 9:00am" {
+	if c.Title != "🔥 Cone 6 Glaze — Thu Nov 12" {
 		t.Errorf("title = %q", c.Title)
 	}
 	if strings.Join(c.Lines, "\n") != strings.Join(want, "\n") {
@@ -45,9 +45,9 @@ func TestRenderProposed(t *testing.T) {
 
 func TestRenderVariants(t *testing.T) {
 	f := sampleFiring()
-	now := f.ScheduledStart
+	now := f.RequestsCloseAt.Add(12 * time.Hour)
 	reason := "not enough work"
-	started := f.ScheduledStart.Add(15 * time.Minute)
+	started := f.RequestsCloseAt.Add(12 * time.Hour).Add(15 * time.Minute)
 	unload := started.Add(30 * time.Hour)
 	cases := []struct {
 		mut   func(*db.Firing)
@@ -56,7 +56,7 @@ func TestRenderVariants(t *testing.T) {
 		{func(f *db.Firing) { f.Status = firing.OnHold; f.HoldReason = &reason }, "⏸ Waiting for more work — not enough work"},
 		{func(f *db.Firing) { f.Status = firing.Firing; f.StartedAt = &started; f.EstimatedUnloadAt = &unload },
 			"Firing now · started 9:15am · est. unload Fri 3:15pm"},
-		{func(f *db.Firing) { f.Status = firing.ReadyForPickup }, "✅ Ready for pickup"},
+		{func(f *db.Firing) { f.Status = firing.Completed }, "✅ Ready for pickup"},
 		{func(f *db.Firing) { f.Status = firing.Cancelled; f.CancelReason = &reason }, "❌ Cancelled — not enough work"},
 		{func(f *db.Firing) { f.Status = firing.Loading }, "Status: Loading"},
 	}
@@ -83,7 +83,7 @@ func TestRenderVariants(t *testing.T) {
 
 func TestCardHash(t *testing.T) {
 	f := sampleFiring()
-	now := f.ScheduledStart.Add(-48 * time.Hour)
+	now := f.RequestsCloseAt.Add(12 * time.Hour).Add(-48 * time.Hour)
 	a := render(f, 1, firing.Fullness{Display: 50, RoomLeft: 50}, now)
 	b := render(f, 1, firing.Fullness{Display: 50, RoomLeft: 50}, now.Add(time.Hour))
 	c := render(f, 2, firing.Fullness{Display: 70, RoomLeft: 30}, now)
@@ -97,7 +97,7 @@ func TestCardHash(t *testing.T) {
 
 func TestTitleAndDescribe(t *testing.T) {
 	f := sampleFiring()
-	if Describe(f, denver) != "Cone 6 Glaze (Thu Nov 12, 9:00am)" {
+	if Describe(f, denver) != "Cone 6 Glaze (Thu Nov 12)" {
 		t.Errorf("describe = %q", Describe(f, denver))
 	}
 	title := "Holiday mugs"

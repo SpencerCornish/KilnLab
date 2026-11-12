@@ -14,7 +14,7 @@ var (
 
 func snap(status firing.Status, pct int) Snapshot {
 	return Snapshot{
-		Status: status, CreatedAt: start.Add(-72 * time.Hour), ScheduledStart: start,
+		Status: status, CreatedAt: start.Add(-72 * time.Hour), DayEnd: start,
 		RequestsCloseAt: start.Add(-12 * time.Hour), FullnessPct: pct,
 	}
 }
@@ -92,7 +92,7 @@ func TestMissedUnload(t *testing.T) {
 			t.Errorf("%s: not due after grace", st)
 		}
 	}
-	s.Status = firing.Unloaded
+	s.Status = firing.Completed
 	if Due(s, rules, unload.Add(10*time.Hour)).MissedUnload {
 		t.Error("unloaded: shouldn't remind")
 	}

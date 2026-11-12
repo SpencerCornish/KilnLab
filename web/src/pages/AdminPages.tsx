@@ -13,11 +13,11 @@ export function AdminIndexPage() {
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold">Admin</h1>
-      <Link to="/admin/users" className="btn bg-stone-900 text-white">
-        People &amp; self-loaders
-      </Link>
       {me.roles.admin && (
         <>
+          <Link to="/admin/users" className="btn bg-stone-900 text-white">
+            People
+          </Link>
           <Link to="/admin/settings" className="btn bg-stone-900 text-white">
             Studio settings &amp; kilns
           </Link>
@@ -81,7 +81,7 @@ function NotificationLogSection() {
   )
 }
 
-/** /admin/users: kiln masters toggle self-loader; admins toggle admin. */
+/** /admin/users: admins toggle admin access. */
 export function AdminUsersPage() {
   const { me, refresh } = useSession()
   const { data, error, setData } = useLoad(listUsers, [])
@@ -89,16 +89,16 @@ export function AdminUsersPage() {
   const [err, setErr] = useState<string | null>(null)
   const [query, setQuery] = useState('')
 
-  if (!me || !(me.roles.kiln_master || me.roles.admin)) return <Navigate to="/" replace />
+  if (!me || !me.roles.admin) return <Navigate to="/" replace />
   if (error) return <Alert kind="error">{error}</Alert>
   if (!data) return <PageSpinner />
 
-  async function toggle(u: AdminUser, patch: { self_loader?: boolean; admin?: boolean }) {
+  async function toggle(u: AdminUser, patch: { admin: boolean }) {
     setBusy(u.id)
     setErr(null)
     try {
       await updateUser(u.id, patch)
-      setData(data!.map((x) => (x.id === u.id ? { ...x, is_self_loader: patch.self_loader ?? x.is_self_loader, is_admin: patch.admin ?? x.is_admin } : x)))
+      setData(data!.map((x) => (x.id === u.id ? { ...x, is_admin: patch.admin } : x)))
       if (u.id === me!.id) await refresh()
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
@@ -116,9 +116,7 @@ export function AdminUsersPage() {
         ← Admin
       </Link>
       <h1 className="text-2xl font-bold">People</h1>
-      <p className="text-stone-600">
-        Self-loaders can load and unload firings they're assigned to. Kiln masters come from the Kiln Master role in Discord.
-      </p>
+      <p className="text-stone-600">Admins can manage studio settings and other admins. Kiln masters come from the Kiln Master role in Discord.</p>
       <input
         type="search"
         value={query}
@@ -142,19 +140,11 @@ export function AdminUsersPage() {
             </div>
             <div className="flex flex-wrap gap-2">
               <Toggle
-                label="Self-loader"
-                on={u.is_self_loader}
-                disabled={busy === u.id}
-                onChange={(v) => toggle(u, { self_loader: v })}
+                label="Admin"
+                on={u.is_admin}
+                disabled={busy === u.id || u.id === me.id}
+                onChange={(v) => toggle(u, { admin: v })}
               />
-              {me.roles.admin && (
-                <Toggle
-                  label="Admin"
-                  on={u.is_admin}
-                  disabled={busy === u.id || u.id === me.id}
-                  onChange={(v) => toggle(u, { admin: v })}
-                />
-              )}
             </div>
           </li>
         ))}

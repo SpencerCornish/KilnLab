@@ -69,17 +69,17 @@ func threadOf(rows []outboxRow) string {
 
 func TestActionsEnqueueNotifications(t *testing.T) {
 	e, pool := newFiringEnvPool(t, func(c *config.Config) { c.NotificationsDryRun = true })
-	alice := e.login("Alice", false, false)
-	bob := e.login("Bob", false, false)
-	carol := e.login("Carol", false, false)
-	km := e.login("Kim", true, false)
+	alice := e.login("Alice", false)
+	bob := e.login("Bob", false)
+	carol := e.login("Carol", false)
+	km := e.login("Kim", true)
 	id := func(c *apiClient) int64 {
 		return int64(jget(c.mustDo("GET", "/api/me", nil, http.StatusOK), "id").(float64))
 	}
 	aliceID, bobID, carolID := id(alice), id(bob), id(carol)
 
 	d := alice.mustDo("POST", "/api/firings", map[string]any{"firing_type": "glaze", "cone": "6",
-		"scheduled_start": e.now.Add(72 * time.Hour), "description": "mugs", "share_pct": 30}, http.StatusCreated)
+		"scheduled_date": dayOf(e.now.Add(72 * time.Hour)), "description": "mugs", "share_pct": 30}, http.StatusCreated)
 	base := fmt.Sprintf("/api/firings/%d", int64(jget(d, "firing", "id").(float64)))
 	rows := drainOutbox(t, pool)
 	if len(rows) != 2 || rows[0].kind != "channel_upsert" { // one main message per platform
@@ -112,7 +112,7 @@ func TestActionsEnqueueNotifications(t *testing.T) {
 	}
 
 	// Reschedule → thread reply + DMs.
-	km.mustDo("POST", base+"/reschedule", map[string]any{"scheduled_start": e.now.Add(96 * time.Hour)}, http.StatusOK)
+	km.mustDo("POST", base+"/reschedule", map[string]any{"scheduled_date": dayOf(e.now.Add(96 * time.Hour))}, http.StatusOK)
 	rows = drainOutbox(t, pool)
 	if threadOf(rows) == "" || len(dmRecipients(rows)) != 3 {
 		t.Fatalf("reschedule: thread %q, DMs %v", threadOf(rows), dmRecipients(rows))
@@ -126,7 +126,7 @@ func TestActionsEnqueueNotifications(t *testing.T) {
 	if th := threadOf(drainOutbox(t, pool)); th == "" {
 		t.Fatal("start should post a thread reply")
 	}
-	km.mustDo("POST", base+"/status", map[string]any{"to": "ready_for_pickup"}, http.StatusOK)
+	km.mustDo("POST", base+"/status", map[string]any{"to": "completed"}, http.StatusOK)
 	rows = drainOutbox(t, pool)
 	if got := dmRecipients(rows); !slices.Equal(got, []int64{aliceID, bobID}) || threadOf(rows) == "" {
 		t.Fatalf("ready: DMs %v, thread %q", got, threadOf(rows))
@@ -134,7 +134,7 @@ func TestActionsEnqueueNotifications(t *testing.T) {
 
 	// The actor isn't DMed: Alice (proposer) cancelling isn't possible, so check a KM-proposed firing.
 	d = km.mustDo("POST", "/api/firings", map[string]any{"firing_type": "bisque", "cone": "04",
-		"scheduled_start": e.now.Add(72 * time.Hour), "description": "x", "share_pct": 10}, http.StatusCreated)
+		"scheduled_date": dayOf(e.now.Add(72 * time.Hour)), "description": "x", "share_pct": 10}, http.StatusCreated)
 	base2 := fmt.Sprintf("/api/firings/%d", int64(jget(d, "firing", "id").(float64)))
 	bob.mustDo("POST", base2+"/requests", map[string]any{"description": "y", "share_pct": 10, "cone": "04"}, http.StatusOK)
 	drainOutbox(t, pool)

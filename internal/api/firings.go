@@ -130,7 +130,7 @@ type firingDTO struct {
 	FiringType               string          `json:"firing_type"`
 	Cone                     string          `json:"cone"`
 	Notes                    string          `json:"notes"`
-	ScheduledStart           time.Time       `json:"scheduled_start"`
+	ScheduledDate            Day             `json:"scheduled_date"`
 	Status                   db.FiringStatus `json:"status"`
 	HoldReason               *string         `json:"hold_reason"`
 	CancelReason             *string         `json:"cancel_reason"`
@@ -158,14 +158,14 @@ type firingDTO struct {
 func (s *Server) toFiringDTO(f db.Firing, proposerName string, approved []int32) firingDTO {
 	return firingDTO{
 		ID: f.ID, KilnID: f.KilnID, Title: f.Title, FiringType: f.FiringType, Cone: f.Cone, Notes: f.Notes,
-		ScheduledStart: f.ScheduledStart, Status: f.Status, HoldReason: f.HoldReason, CancelReason: f.CancelReason,
+		ScheduledDate: Day(f.ScheduledDate), Status: f.Status, HoldReason: f.HoldReason, CancelReason: f.CancelReason,
 		Proposer:            userRef{f.ProposedByUserID, proposerName},
 		ProposerDescription: f.ProposerDescription, ProposerSharePct: f.ProposerSharePct,
 		ProposerCone: f.ProposerCone, ProposerClayBody: f.ProposerClayBody,
 		Fullness:        firing.ComputeFullness(f.ProposerSharePct, approved, f.FullnessOverridePct),
 		RequestsCloseAt: f.RequestsCloseAt, RequestsClosedManually: f.RequestsClosedManually,
 		RequestsOpen: firing.RequestsOpen(window(f), s.now()),
-		LoaderUserID: f.LoaderUserID, Program: f.Program, EstimatedDurationMinutes: f.EstimatedDurationMinutes,
+		Program:      f.Program, EstimatedDurationMinutes: f.EstimatedDurationMinutes,
 		StartedAt: f.StartedAt, EstimatedUnloadAt: f.EstimatedUnloadAt, CoolingAt: f.CoolingAt,
 		UnloadedAt: f.UnloadedAt, ReadyForPickupAt: f.ReadyForPickupAt, CompletedAt: f.CompletedAt,
 		CreatedAt: f.CreatedAt,
@@ -222,7 +222,7 @@ type eventDTO struct {
 // every action anyway.
 type firingPermsDTO struct {
 	Request    bool `json:"request"`
-	Manage     bool `json:"manage"` // override fullness, close/reopen requests, assign loader
+	Manage     bool `json:"manage"` // override fullness, close/reopen requests
 	Confirm    bool `json:"confirm"`
 	Hold       bool `json:"hold"`
 	Release    bool `json:"release"`
@@ -238,7 +238,6 @@ type firingPermsDTO struct {
 
 type firingDetailDTO struct {
 	Firing    firingDTO      `json:"firing"`
-	Loader    *userRef       `json:"loader"`
 	Requests  []requestDTO   `json:"requests"`
 	MyRequest *requestDTO    `json:"my_request"`
 	Events    []eventDTO     `json:"events"`
@@ -271,14 +270,6 @@ func (s *Server) firingDetail(ctx context.Context, q *db.Queries, id int64, u *c
 		}
 	}
 	d := &firingDetailDTO{Firing: s.toFiringDTO(f, proposerName, approved), Requests: []requestDTO{}, Events: []eventDTO{}}
-
-	if f.LoaderUserID != nil {
-		name, err := q.GetUserName(ctx, *f.LoaderUserID)
-		if err != nil {
-			return nil, err
-		}
-		d.Loader = &userRef{*f.LoaderUserID, name}
-	}
 
 	open := d.Firing.RequestsOpen
 	canDecide := u.Roles.CanDecideRequests(f.ProposedByUserID == u.ID) && firing.CanDecideRequests(f.Status)
@@ -328,7 +319,7 @@ func (s *Server) firingDetail(ctx context.Context, q *db.Queries, id int64, u *c
 		d.Events = append(d.Events, dto)
 	}
 
-	actor := firing.Actor{Roles: u.Roles, IsLoader: f.LoaderUserID != nil && *f.LoaderUserID == u.ID}
+	actor := firing.Actor{Roles: u.Roles}
 	st := firing.State{Status: f.Status, WasConfirmed: f.WasConfirmed}
 	ok := func(_ firing.Status, err error) bool { return err == nil }
 	d.Can = firingPermsDTO{
@@ -472,16 +463,16 @@ func (s *Server) handleGetFiring(w http.ResponseWriter, r *http.Request) {
 }
 
 type createFiringRequest struct {
-	KilnID         int64     `json:"kiln_id"` // optional while only one kiln is active
-	FiringType     string    `json:"firing_type"`
-	Cone           string    `json:"cone"`
-	Title          *string   `json:"title"`
-	Notes          string    `json:"notes"`
-	ScheduledStart time.Time `json:"scheduled_start"`
-	Description    string    `json:"description"`
-	SharePct       int32     `json:"share_pct"`
-	ProposerCone   string    `json:"proposer_cone"` // defaults to cone
-	ClayBody       *string   `json:"clay_body"`
+	KilnID        int64   `json:"kiln_id"` // optional while only one kiln is active
+	FiringType    string  `json:"firing_type"`
+	Cone          string  `json:"cone"`
+	Title         *string `json:"title"`
+	Notes         string  `json:"notes"`
+	ScheduledDate Day     `json:"scheduled_date"` // the day; no start time is promised
+	Description   string  `json:"description"`
+	SharePct      int32   `json:"share_pct"`
+	ProposerCone  string  `json:"proposer_cone"` // defaults to cone
+	ClayBody      *string `json:"clay_body"`
 }
 
 func (s *Server) handleCreateFiring(w http.ResponseWriter, r *http.Request) {
@@ -517,16 +508,22 @@ func (s *Server) handleCreateFiring(w http.ResponseWriter, r *http.Request) {
 			}
 			p.ProposerCone = req.ProposerCone
 		}
-		if req.ScheduledStart.IsZero() {
-			return badRequest("start time is required")
+		day := time.Time(req.ScheduledDate)
+		if day.IsZero() {
+			return badRequest("date is required")
 		}
-		p.ScheduledStart = req.ScheduledStart.UTC()
+		loc := s.studioLocation(ctx, q)
+		if !firing.DayEnd(day, loc).After(s.now()) {
+			return badRequest("that day has already passed")
+		}
+		p.ScheduledDate = day
+		start := firing.DayStart(day, loc)
 		if !u.Roles.CanBypassMinNotice() {
-			if err := firing.CheckMinNotice(p.ScheduledStart, s.now(), st.MinNoticeHours); err != nil {
+			if err := firing.CheckMinNotice(start, s.now(), st.MinNoticeHours); err != nil {
 				return badRequest("%s", err.Error())
 			}
 		}
-		p.RequestsCloseAt = firing.RequestsCloseAt(p.ScheduledStart, st.RequestCutoffHours)
+		p.RequestsCloseAt = firing.RequestsCloseAt(start, st.RequestCutoffHours)
 		if err := checkShare(req.SharePct); err != nil {
 			return err
 		}

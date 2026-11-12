@@ -1,6 +1,6 @@
 // Command seed fills the dev database with sample users and firings in
 // various states. Users match the dev login form, so you can sign in as any
-// of them by name: Kim (kiln master), Sam (self-loader), Alice, Bob (BMS), Carol.
+// of them by name: Kim (kiln master), Sam, Alice, Bob (BMS), Carol.
 //
 //	make seed           # refuses if firings already exist
 //	go run ./cmd/seed -force
@@ -28,15 +28,14 @@ type seedUser struct {
 	name       string
 	community  string // artlab | bms
 	kilnMaster bool
-	selfLoader bool
 }
 
 var users = []seedUser{
-	{"Kim", "artlab", true, false},
-	{"Sam", "artlab", false, true},
-	{"Alice", "artlab", false, false},
-	{"Bob", "bms", false, false},
-	{"Carol", "artlab", false, false},
+	{"Kim", "artlab", true},
+	{"Sam", "artlab", false},
+	{"Alice", "artlab", false},
+	{"Bob", "bms", false},
+	{"Carol", "artlab", false},
 }
 
 type seedRequest struct {
@@ -57,19 +56,18 @@ type seedFiring struct {
 	status       db.FiringStatus
 	holdReason   string
 	cancelReason string
-	loader       string
 	requests     []seedRequest
 }
 
 var firings = []seedFiring{
 	{
 		proposer: "Alice", in: -4 * time.Hour, typ: "glaze", cone: "6", share: 60, desc: "Dinner plates",
-		status: firing.Firing, loader: "Sam",
+		status:   firing.Firing,
 		requests: []seedRequest{{"Carol", 30, "6", true, "Mugs", db.RequestStatusApproved}},
 	},
 	{
 		proposer: "Kim", in: 50 * time.Hour, typ: "bisque", cone: "04", share: 40, desc: "Greenware from the Tuesday class",
-		status: firing.Confirmed, loader: "Sam",
+		status: firing.Confirmed,
 		requests: []seedRequest{
 			{"Alice", 30, "04", false, "6 bowls, 2 plates", db.RequestStatusApproved},
 			{"Bob", 15, "04", false, "Tiles", db.RequestStatusPending},
@@ -183,23 +181,23 @@ func upsertUser(ctx context.Context, pool *pgxpool.Pool, u seedUser) (int64, err
 	}
 	err = pool.QueryRow(ctx, `
 		WITH u AS (
-			INSERT INTO users (display_name, community, is_self_loader) VALUES ($1, $2, $3) RETURNING id
+			INSERT INTO users (display_name, community) VALUES ($1, $2) RETURNING id
 		)
 		INSERT INTO accounts (user_id, provider, provider_user_id, provider_team_or_guild_id, is_kiln_master)
 		SELECT id, $4, $5, '', $6 FROM u
 		RETURNING user_id`,
-		u.name, u.community, u.selfLoader, provider, pid, u.kilnMaster).Scan(&id)
+		u.name, u.community, provider, pid, u.kilnMaster).Scan(&id)
 	return id, err
 }
 
 func seedOne(ctx context.Context, q *db.Queries, ids map[string]int64, kilnID int64, cutoff int32, loc *time.Location, sf seedFiring) error {
-	// Round to the next whole hour in the studio timezone.
-	start := time.Now().In(loc).Add(sf.in).Truncate(time.Hour).UTC()
+	// Firings are booked by day: the studio-local day sf.in from now.
+	day := firing.DayOf(time.Now().In(loc).Add(sf.in), loc)
 	created := time.Now().Add(-24 * time.Hour)
 	f, err := q.CreateFiring(ctx, db.CreateFiringParams{
 		KilnID: kilnID, ProposedByUserID: ids[sf.proposer], FiringType: sf.typ, Cone: sf.cone,
-		ScheduledStart: start, ProposerDescription: sf.desc, ProposerSharePct: sf.share, ProposerCone: sf.cone,
-		RequestsCloseAt: firing.RequestsCloseAt(start, cutoff),
+		ScheduledDate: day, ProposerDescription: sf.desc, ProposerSharePct: sf.share, ProposerCone: sf.cone,
+		RequestsCloseAt: firing.RequestsCloseAt(firing.DayStart(day, loc), cutoff),
 	})
 	if err != nil {
 		return err
@@ -281,15 +279,6 @@ func seedOne(ctx context.Context, q *db.Queries, ids map[string]int64, kilnID in
 	}
 	if err != nil {
 		return err
-	}
-	if sf.loader != "" {
-		id := ids[sf.loader]
-		if _, err := q.SetLoader(ctx, db.SetLoaderParams{ID: f.ID, LoaderUserID: &id}); err != nil {
-			return err
-		}
-		if err := event("Kim", firing.EventLoaderAssigned, nil, nil, "Assigned "+sf.loader+" as loader", at); err != nil {
-			return err
-		}
 	}
 	return nil
 }

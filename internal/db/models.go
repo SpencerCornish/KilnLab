@@ -191,17 +191,15 @@ func AllEventSourceValues() []EventSource {
 type FiringStatus string
 
 const (
-	FiringStatusProposed       FiringStatus = "proposed"
-	FiringStatusOnHold         FiringStatus = "on_hold"
-	FiringStatusConfirmed      FiringStatus = "confirmed"
-	FiringStatusLoading        FiringStatus = "loading"
-	FiringStatusLoaded         FiringStatus = "loaded"
-	FiringStatusFiring         FiringStatus = "firing"
-	FiringStatusCooling        FiringStatus = "cooling"
-	FiringStatusUnloaded       FiringStatus = "unloaded"
-	FiringStatusReadyForPickup FiringStatus = "ready_for_pickup"
-	FiringStatusCompleted      FiringStatus = "completed"
-	FiringStatusCancelled      FiringStatus = "cancelled"
+	FiringStatusProposed  FiringStatus = "proposed"
+	FiringStatusOnHold    FiringStatus = "on_hold"
+	FiringStatusConfirmed FiringStatus = "confirmed"
+	FiringStatusLoading   FiringStatus = "loading"
+	FiringStatusLoaded    FiringStatus = "loaded"
+	FiringStatusFiring    FiringStatus = "firing"
+	FiringStatusCooling   FiringStatus = "cooling"
+	FiringStatusCompleted FiringStatus = "completed"
+	FiringStatusCancelled FiringStatus = "cancelled"
 )
 
 func (e *FiringStatus) Scan(src interface{}) error {
@@ -248,8 +246,6 @@ func (e FiringStatus) Valid() bool {
 		FiringStatusLoaded,
 		FiringStatusFiring,
 		FiringStatusCooling,
-		FiringStatusUnloaded,
-		FiringStatusReadyForPickup,
 		FiringStatusCompleted,
 		FiringStatusCancelled:
 		return true
@@ -266,8 +262,6 @@ func AllFiringStatusValues() []FiringStatus {
 		FiringStatusLoaded,
 		FiringStatusFiring,
 		FiringStatusCooling,
-		FiringStatusUnloaded,
-		FiringStatusReadyForPickup,
 		FiringStatusCompleted,
 		FiringStatusCancelled,
 	}
@@ -475,7 +469,6 @@ type Firing struct {
 	Cone                       string       `json:"cone"`
 	Title                      *string      `json:"title"`
 	Notes                      string       `json:"notes"`
-	ScheduledStart             time.Time    `json:"scheduled_start"`
 	Status                     FiringStatus `json:"status"`
 	WasConfirmed               bool         `json:"was_confirmed"`
 	HoldReason                 *string      `json:"hold_reason"`
@@ -487,7 +480,6 @@ type Firing struct {
 	FullnessOverridePct        *int32       `json:"fullness_override_pct"`
 	RequestsCloseAt            time.Time    `json:"requests_close_at"`
 	RequestsClosedManually     bool         `json:"requests_closed_manually"`
-	LoaderUserID               *int64       `json:"loader_user_id"`
 	Program                    *string      `json:"program"`
 	EstimatedDurationMinutes   *int32       `json:"estimated_duration_minutes"`
 	StartedAt                  *time.Time   `json:"started_at"`
@@ -502,6 +494,7 @@ type Firing struct {
 	CreatedAt                  time.Time    `json:"created_at"`
 	UpdatedAt                  time.Time    `json:"updated_at"`
 	RequestsCloseHandledAt     *time.Time   `json:"requests_close_handled_at"`
+	ScheduledDate              time.Time    `json:"scheduled_date"`
 }
 
 type FiringEvent struct {
@@ -605,12 +598,11 @@ type Setting struct {
 }
 
 type User struct {
-	ID           int64     `json:"id"`
-	DisplayName  string    `json:"display_name"`
-	AvatarUrl    *string   `json:"avatar_url"`
-	Community    Community `json:"community"`
-	IsSelfLoader bool      `json:"is_self_loader"`
-	IsAdmin      bool      `json:"is_admin"`
-	CreatedAt    time.Time `json:"created_at"`
-	LastLoginAt  time.Time `json:"last_login_at"`
+	ID          int64     `json:"id"`
+	DisplayName string    `json:"display_name"`
+	AvatarUrl   *string   `json:"avatar_url"`
+	Community   Community `json:"community"`
+	IsAdmin     bool      `json:"is_admin"`
+	CreatedAt   time.Time `json:"created_at"`
+	LastLoginAt time.Time `json:"last_login_at"`
 }

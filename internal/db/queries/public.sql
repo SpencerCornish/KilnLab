@@ -10,7 +10,7 @@ SELECT sqlc.embed(f),
          WHERE r.firing_id = f.id AND r.status = 'approved')::int AS approved_count
 FROM firings f
 WHERE f.status::text = ANY (sqlc.arg(statuses)::text[])
-  AND f.scheduled_start <= sqlc.arg(until)
-  AND (f.scheduled_start >= sqlc.arg(since)
-       OR f.status IN ('loading', 'loaded', 'firing', 'cooling', 'unloaded'))
-ORDER BY f.scheduled_start, f.id;
+  AND f.scheduled_date <= sqlc.arg(until)
+  AND (f.scheduled_date >= sqlc.arg(since)
+       OR f.status IN ('loading', 'loaded', 'firing', 'cooling'))
+ORDER BY f.scheduled_date, f.id;

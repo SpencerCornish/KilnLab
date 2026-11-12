@@ -114,7 +114,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) er
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (display_name, avatar_url, community, is_admin)
 VALUES ($1, $2, $3, $4)
-RETURNING id, display_name, avatar_url, community, is_self_loader, is_admin, created_at, last_login_at
+RETURNING id, display_name, avatar_url, community, is_admin, created_at, last_login_at
 `
 
 type CreateUserParams struct {
@@ -137,7 +137,6 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.DisplayName,
 		&i.AvatarUrl,
 		&i.Community,
-		&i.IsSelfLoader,
 		&i.IsAdmin,
 		&i.CreatedAt,
 		&i.LastLoginAt,
@@ -199,7 +198,7 @@ func (q *Queries) GetAccountByProvider(ctx context.Context, arg GetAccountByProv
 }
 
 const getSessionUser = `-- name: GetSessionUser :one
-SELECT u.id, u.display_name, u.avatar_url, u.community, u.is_self_loader, u.is_admin, u.created_at, u.last_login_at FROM sessions s
+SELECT u.id, u.display_name, u.avatar_url, u.community, u.is_admin, u.created_at, u.last_login_at FROM sessions s
 JOIN users u ON u.id = s.user_id
 WHERE s.id = $1 AND s.expires_at > now()
 `
@@ -212,7 +211,6 @@ func (q *Queries) GetSessionUser(ctx context.Context, id string) (User, error) {
 		&i.DisplayName,
 		&i.AvatarUrl,
 		&i.Community,
-		&i.IsSelfLoader,
 		&i.IsAdmin,
 		&i.CreatedAt,
 		&i.LastLoginAt,
@@ -221,7 +219,7 @@ func (q *Queries) GetSessionUser(ctx context.Context, id string) (User, error) {
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, display_name, avatar_url, community, is_self_loader, is_admin, created_at, last_login_at FROM users WHERE id = $1
+SELECT id, display_name, avatar_url, community, is_admin, created_at, last_login_at FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUser(ctx context.Context, id int64) (User, error) {
@@ -232,7 +230,6 @@ func (q *Queries) GetUser(ctx context.Context, id int64) (User, error) {
 		&i.DisplayName,
 		&i.AvatarUrl,
 		&i.Community,
-		&i.IsSelfLoader,
 		&i.IsAdmin,
 		&i.CreatedAt,
 		&i.LastLoginAt,
@@ -299,7 +296,7 @@ SET display_name  = $2,
     is_admin      = is_admin OR $4::boolean,
     last_login_at = now()
 WHERE id = $1
-RETURNING id, display_name, avatar_url, community, is_self_loader, is_admin, created_at, last_login_at
+RETURNING id, display_name, avatar_url, community, is_admin, created_at, last_login_at
 `
 
 type UpdateUserOnLoginParams struct {
@@ -324,7 +321,6 @@ func (q *Queries) UpdateUserOnLogin(ctx context.Context, arg UpdateUserOnLoginPa
 		&i.DisplayName,
 		&i.AvatarUrl,
 		&i.Community,
-		&i.IsSelfLoader,
 		&i.IsAdmin,
 		&i.CreatedAt,
 		&i.LastLoginAt,

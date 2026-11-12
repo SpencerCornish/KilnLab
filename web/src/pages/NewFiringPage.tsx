@@ -1,11 +1,9 @@
-import { addHours, setHours, startOfHour } from 'date-fns'
-import { TZDate } from '@date-fns/tz'
 import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router'
 import { Alert, ConeSelect, Field, inputClass, ShareInput } from '../components/firing'
 import { createFiring, getOptions } from '../lib/api'
 import { PageSpinner, useSession } from '../lib/session'
-import { fromInputValue, toInputValue } from '../lib/time'
+import { earliestDay } from '../lib/time'
 import type { Options } from '../lib/types'
 import { useLoad } from '../lib/useLoad'
 
@@ -16,13 +14,6 @@ export default function NewFiringPage() {
   return <ProposeForm options={options} />
 }
 
-/** First 9am in the studio timezone that satisfies the minimum notice. */
-function defaultStart(o: Options): string {
-  const earliest = startOfHour(addHours(TZDate.tz(o.timezone), o.min_notice_hours + 1))
-  let d = setHours(earliest, 9)
-  if (d < earliest) d = addHours(d, 24)
-  return toInputValue(d.toISOString(), o.timezone)
-}
 
 function ProposeForm({ options }: { options: Options }) {
   const { me } = useSession()
@@ -33,7 +24,9 @@ function ProposeForm({ options }: { options: Options }) {
   const [kilnId, setKilnId] = useState(activeKilns[0]?.id ?? 0)
   const [firingType, setFiringType] = useState(options.firing_types.includes('glaze') ? 'glaze' : options.firing_types[0]!)
   const [cone, setCone] = useState(options.cones.includes('6') ? '6' : options.cones[0]!)
-  const [start, setStart] = useState(() => defaultStart(options))
+  // Firings are booked by day. Members start from the earliest day their notice allows.
+  const earliest = earliestDay(options.timezone, options.min_notice_hours)
+  const [day, setDay] = useState(earliest)
   const [description, setDescription] = useState('')
   const [share, setShare] = useState(25)
   const [clayBody, setClayBody] = useState('')
@@ -44,8 +37,7 @@ function ProposeForm({ options }: { options: Options }) {
 
   async function submit(e: FormEvent) {
     e.preventDefault()
-    const iso = fromInputValue(start, options.timezone)
-    if (!iso) return setErr('Pick a date and time.')
+    if (!day) return setErr('Pick a day.')
     setBusy(true)
     setErr(null)
     try {
@@ -55,7 +47,7 @@ function ProposeForm({ options }: { options: Options }) {
         cone,
         title: title || null,
         notes,
-        scheduled_start: iso,
+        scheduled_date: day,
         description,
         share_pct: share,
         proposer_cone: cone,
@@ -110,18 +102,25 @@ function ProposeForm({ options }: { options: Options }) {
       <ConeSelect value={cone} onChange={setCone} cones={options.cones} />
 
       <Field
-        label="Start"
+        label="Day"
         hint={
           <p className="mt-1 text-sm text-stone-500">
-            {options.timezone.replace('_', ' ')} time.{' '}
+            Firings are booked for a day. There's no start time to hold to: the kiln runs sometime that day.{' '}
             {canBypass
               ? 'As a kiln master you can skip the minimum notice.'
-              : `At least ${options.min_notice_hours} hours from now.`}{' '}
-            Requests close {options.request_cutoff_hours}h before the start.
+              : `The day has to start at least ${options.min_notice_hours} hours from now.`}{' '}
+            Requests close {options.request_cutoff_hours}h before the day starts.
           </p>
         }
       >
-        <input type="datetime-local" required value={start} onChange={(e) => setStart(e.target.value)} className={inputClass} />
+        <input
+          type="date"
+          required
+          min={canBypass ? undefined : earliest}
+          value={day}
+          onChange={(e) => setDay(e.target.value)}
+          className={inputClass}
+        />
       </Field>
 
       <div className="card space-y-4">

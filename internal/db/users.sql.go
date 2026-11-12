@@ -11,7 +11,7 @@ import (
 )
 
 const listUsers = `-- name: ListUsers :many
-SELECT u.id, u.display_name, u.avatar_url, u.community, u.is_self_loader, u.is_admin, u.created_at, u.last_login_at,
+SELECT u.id, u.display_name, u.avatar_url, u.community, u.is_admin, u.created_at, u.last_login_at,
        EXISTS (SELECT 1 FROM accounts a WHERE a.user_id = u.id AND a.is_kiln_master) AS is_kiln_master,
        (SELECT a.provider FROM accounts a WHERE a.user_id = u.id ORDER BY a.id LIMIT 1)::auth_provider AS provider
 FROM users u
@@ -23,7 +23,6 @@ type ListUsersRow struct {
 	DisplayName  string       `json:"display_name"`
 	AvatarUrl    *string      `json:"avatar_url"`
 	Community    Community    `json:"community"`
-	IsSelfLoader bool         `json:"is_self_loader"`
 	IsAdmin      bool         `json:"is_admin"`
 	CreatedAt    time.Time    `json:"created_at"`
 	LastLoginAt  time.Time    `json:"last_login_at"`
@@ -45,7 +44,6 @@ func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
 			&i.DisplayName,
 			&i.AvatarUrl,
 			&i.Community,
-			&i.IsSelfLoader,
 			&i.IsAdmin,
 			&i.CreatedAt,
 			&i.LastLoginAt,
@@ -63,7 +61,7 @@ func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
 }
 
 const setUserAdmin = `-- name: SetUserAdmin :one
-UPDATE users SET is_admin = $2 WHERE id = $1 RETURNING id, display_name, avatar_url, community, is_self_loader, is_admin, created_at, last_login_at
+UPDATE users SET is_admin = $2 WHERE id = $1 RETURNING id, display_name, avatar_url, community, is_admin, created_at, last_login_at
 `
 
 type SetUserAdminParams struct {
@@ -79,32 +77,6 @@ func (q *Queries) SetUserAdmin(ctx context.Context, arg SetUserAdminParams) (Use
 		&i.DisplayName,
 		&i.AvatarUrl,
 		&i.Community,
-		&i.IsSelfLoader,
-		&i.IsAdmin,
-		&i.CreatedAt,
-		&i.LastLoginAt,
-	)
-	return i, err
-}
-
-const setUserSelfLoader = `-- name: SetUserSelfLoader :one
-UPDATE users SET is_self_loader = $2 WHERE id = $1 RETURNING id, display_name, avatar_url, community, is_self_loader, is_admin, created_at, last_login_at
-`
-
-type SetUserSelfLoaderParams struct {
-	ID           int64 `json:"id"`
-	IsSelfLoader bool  `json:"is_self_loader"`
-}
-
-func (q *Queries) SetUserSelfLoader(ctx context.Context, arg SetUserSelfLoaderParams) (User, error) {
-	row := q.db.QueryRow(ctx, setUserSelfLoader, arg.ID, arg.IsSelfLoader)
-	var i User
-	err := row.Scan(
-		&i.ID,
-		&i.DisplayName,
-		&i.AvatarUrl,
-		&i.Community,
-		&i.IsSelfLoader,
 		&i.IsAdmin,
 		&i.CreatedAt,
 		&i.LastLoginAt,

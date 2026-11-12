@@ -56,7 +56,11 @@ func (r *Runner) Run(ctx context.Context) {
 // One firing failing doesn't stop the others.
 func (r *Runner) Tick(ctx context.Context) (int, error) {
 	now := r.Now()
-	ids, err := db.New(r.pool).ListJobCandidates(ctx, now)
+	// Today is a superset cut-off for the candidate query: the studio's date is
+	// never later than the UTC date plus one day. Due makes the exact call.
+	ids, err := db.New(r.pool).ListJobCandidates(ctx, db.ListJobCandidatesParams{
+		Now: now, Today: firing.DayOf(now.Add(24*time.Hour), time.UTC),
+	})
 	if err != nil {
 		return 0, err
 	}
@@ -77,6 +81,14 @@ func (r *Runner) Tick(ctx context.Context) (int, error) {
 		r.kicker.Kick()
 	}
 	return acted, errors.Join(errs...)
+}
+
+// studioLoc is the studio's timezone, or UTC if it doesn't load.
+func studioLoc(name string) *time.Location {
+	if l, err := time.LoadLocation(name); err == nil {
+		return l
+	}
+	return time.UTC
 }
 
 func rulesFrom(st db.Setting) Rules {
@@ -106,7 +118,7 @@ func (r *Runner) process(ctx context.Context, id int64, now time.Time) (bool, er
 		}
 		full := firing.ComputeFullness(f.ProposerSharePct, approved, f.FullnessOverridePct)
 		due := Due(Snapshot{
-			Status: f.Status, CreatedAt: f.CreatedAt, ScheduledStart: f.ScheduledStart,
+			Status: f.Status, CreatedAt: f.CreatedAt, DayEnd: firing.DayEnd(f.ScheduledDate, studioLoc(st.Timezone)),
 			RequestsCloseAt: f.RequestsCloseAt, ClosedManually: f.RequestsClosedManually,
 			EstimatedUnloadAt: f.EstimatedUnloadAt, FullnessPct: full.Display,
 			CloseHandledAt: f.RequestsCloseHandledAt, MissedStartSentAt: f.MissedStartReminderSentAt,
@@ -171,11 +183,7 @@ func (r *Runner) apply(ctx context.Context, q *db.Queries, f db.Firing, st db.Se
 	}
 	if due.MissedUnload {
 		marks.MissedUnloadReminderSentAt = &now
-		to := kms
-		if f.LoaderUserID != nil {
-			to = append(to, *f.LoaderUserID)
-		}
-		batch.DM(to, notify.AlertMissedUnload(f, loc, url))
+		batch.DM(kms, notify.AlertMissedUnload(f, loc, url))
 		if err := event(firing.EventAlertSent, "Reminder sent: not marked unloaded"); err != nil {
 			return err
 		}

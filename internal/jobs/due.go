@@ -14,7 +14,7 @@ import (
 type Snapshot struct {
 	Status            firing.Status
 	CreatedAt         time.Time
-	ScheduledStart    time.Time
+	DayEnd            time.Time // when the scheduled day ends: a firing not begun by then is missed
 	RequestsCloseAt   time.Time
 	ClosedManually    bool
 	EstimatedUnloadAt *time.Time
@@ -70,7 +70,7 @@ func Due(s Snapshot, r Rules, now time.Time) Result {
 	}
 
 	if slices.Contains(beforeStart, s.Status) && s.MissedStartSentAt == nil &&
-		now.After(s.ScheduledStart.Add(r.MissedStartGrace)) {
+		now.After(s.DayEnd.Add(r.MissedStartGrace)) {
 		out.MissedStart = true
 	}
 

@@ -9,13 +9,9 @@ import (
 )
 
 var (
-	member     = Actor{}
-	selfLoader = Actor{Roles: policy.Roles{SelfLoader: true}}
-	loader     = Actor{Roles: policy.Roles{SelfLoader: true}, IsLoader: true}
+	member     = Actor{} // anyone signed in: can say they've loaded or unloaded
 	kilnMaster = Actor{Roles: policy.Roles{KilnMaster: true}}
 	admin      = Actor{Roles: policy.Roles{Admin: true}}
-	// Assigned as loader but no longer a self-loader: gets nothing.
-	exLoader = Actor{IsLoader: true}
 )
 
 func TestManagementActions(t *testing.T) {
@@ -33,7 +29,7 @@ func TestManagementActions(t *testing.T) {
 	}
 	for name, act := range actions {
 		for _, from := range AllStatuses {
-			for _, a := range []Actor{member, selfLoader, loader, kilnMaster, admin} {
+			for _, a := range []Actor{member, kilnMaster, admin} {
 				got, err := act.fn(State{Status: from}, a)
 				want, ok := act.allowed[from]
 				switch {
@@ -97,7 +93,7 @@ func TestAdvanceRejectsNonLifecycle(t *testing.T) {
 	}
 }
 
-func TestAdvanceSelfLoader(t *testing.T) {
+func TestAdvanceMember(t *testing.T) {
 	cases := []struct {
 		from, to Status
 		ok       bool
@@ -105,31 +101,28 @@ func TestAdvanceSelfLoader(t *testing.T) {
 		{Confirmed, Loading, true},
 		{Loading, Loaded, true},
 		{Confirmed, Loaded, true}, // skipping loading is fine
-		{Cooling, Unloaded, true},
-		{Firing, Unloaded, true}, // skipping cooling is fine
-		{Loaded, Firing, false},  // never start the kiln
+		{Cooling, Completed, true},
+		{Firing, Completed, true}, // skipping cooling is fine
+		{Loaded, Firing, false},   // never start the kiln
 		{Confirmed, Firing, false},
-		{Loaded, Unloaded, false}, // can't skip past the start
-		{Confirmed, Unloaded, false},
+		{Loaded, Completed, false}, // can't skip past the start
+		{Confirmed, Completed, false},
 		{Firing, Cooling, false},
-		{Unloaded, ReadyForPickup, false},
-		{ReadyForPickup, Completed, false},
+		{Completed, Completed, false},
 		{Loaded, Loading, false}, // backwards
 	}
 	for _, c := range cases {
-		err := Advance(State{Status: c.from}, c.to, loader)
+		err := Advance(State{Status: c.from}, c.to, member)
 		if (err == nil) != c.ok {
-			t.Errorf("loader %s → %s: err = %v, want ok=%v", c.from, c.to, err, c.ok)
+			t.Errorf("member %s → %s: err = %v, want ok=%v", c.from, c.to, err, c.ok)
 		}
 	}
 }
 
 func TestOnlyKilnMastersStartTheKiln(t *testing.T) {
-	for _, a := range []Actor{member, selfLoader, loader, exLoader} {
-		for _, from := range lifecycle {
-			if err := Advance(State{Status: from}, Firing, a); !errors.Is(err, ErrForbidden) {
-				t.Errorf("%+v start from %s: err = %v, want forbidden", a, from, err)
-			}
+	for _, from := range lifecycle {
+		if err := Advance(State{Status: from}, Firing, member); !errors.Is(err, ErrForbidden) {
+			t.Errorf("member start from %s: err = %v, want forbidden", from, err)
 		}
 	}
 	for _, a := range []Actor{kilnMaster, admin} {
@@ -139,12 +132,10 @@ func TestOnlyKilnMastersStartTheKiln(t *testing.T) {
 	}
 }
 
-func TestUnassignedCannotAdvance(t *testing.T) {
-	for _, a := range []Actor{member, selfLoader, exLoader} {
-		for _, to := range lifecycle[1:] {
-			if err := Advance(State{Status: Confirmed}, to, a); !errors.Is(err, ErrForbidden) {
-				t.Errorf("%+v confirmed → %s: err = %v, want forbidden", a, to, err)
-			}
+func TestMembersCannotSkipPastStart(t *testing.T) {
+	for _, to := range []Status{Firing, Cooling, Completed} {
+		if err := Advance(State{Status: Confirmed}, to, member); err == nil {
+			t.Errorf("member confirmed → %s should be refused", to)
 		}
 	}
 }

@@ -4,7 +4,7 @@ import { Alert, firingTitle, kilnLabel, StatusBadge, STATUS_LABELS } from '../co
 import { LifecyclePanel, STEP_LABELS } from '../components/lifecycle'
 import { getFiring, getKilnView, getOptions } from '../lib/api'
 import { PageSpinner } from '../lib/session'
-import { formatWhen } from '../lib/time'
+import { formatDate, formatWhen } from '../lib/time'
 import type { FiringStatus, MutationResult } from '../lib/types'
 import { useLoad } from '../lib/useLoad'
 
@@ -45,7 +45,7 @@ export function KilnPage() {
                   <StatusBadge status={f.status} />
                 </div>
                 <p className="text-stone-600">
-                  {formatWhen(f.scheduled_start, options.timezone)}
+                  {formatDate(f.scheduled_date)}
                   {!view.kiln && kilnLabel(options, f.kiln_id) && ` · ${kilnLabel(options, f.kiln_id)}`} · {f.proposer_name}
                 </p>
               </Link>
@@ -92,11 +92,10 @@ export function KilnFiringPage() {
           <h1 className="text-2xl font-bold">{firingTitle(f)}</h1>
           <StatusBadge status={f.status} />
         </div>
-        <p className="text-lg">{formatWhen(f.scheduled_start, tz)}</p>
+        <p className="text-lg">{formatDate(f.scheduled_date)}</p>
         <p className="text-stone-600">
           {kilnLabel(options, f.kiln_id) && `${kilnLabel(options, f.kiln_id)} · `}
           {f.fullness.display_pct}% full · {1 + detail.requests.filter((r) => r.status === 'approved').length} people
-          {detail.loader && ` · loader: ${detail.loader.name}`}
         </p>
         {f.status === 'firing' && f.estimated_unload_at && (
           <p className="text-lg">

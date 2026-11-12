@@ -12,12 +12,14 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/spencercornish/kilnlab/internal/auth"
 	"github.com/spencercornish/kilnlab/internal/config"
 	"github.com/spencercornish/kilnlab/internal/db"
+	"github.com/spencercornish/kilnlab/internal/firing"
 )
 
 func openTestPool(t *testing.T) *pgxpool.Pool {
@@ -249,3 +251,12 @@ func TestLogoutRequiresCSRF(t *testing.T) {
 		t.Fatalf("/me after logout = %d", code)
 	}
 }
+
+// studioLoc is the default studio timezone (settings.timezone).
+var studioLoc, _ = time.LoadLocation("America/Denver")
+
+// dayOf is the scheduled day (YYYY-MM-DD, studio timezone) a test instant falls on.
+func dayOf(t time.Time) string { return firing.DayOf(t, studioLoc).Format(firing.DateLayout) }
+
+// dayStart is when that scheduled day begins: where the notice and cutoff rules count from.
+func dayStart(t time.Time) time.Time { return firing.DayStart(firing.DayOf(t, studioLoc), studioLoc) }

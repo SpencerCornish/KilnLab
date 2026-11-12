@@ -14,7 +14,6 @@ export default function HomePage() {
   if (!me) return null
 
   const roles = [
-    me.roles.self_loader && 'Self-loader',
     me.roles.kiln_master && 'Kiln master',
     me.roles.admin && 'Admin',
   ].filter(Boolean) as string[]

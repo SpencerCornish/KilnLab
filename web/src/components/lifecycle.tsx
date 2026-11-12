@@ -10,9 +10,7 @@ export const STEP_LABELS: Partial<Record<FiringStatus, string>> = {
   loaded: 'Loaded',
   firing: 'START FIRING',
   cooling: 'Kiln off: cooling',
-  unloaded: 'Unloaded',
-  ready_for_pickup: 'Ready for pickup',
-  completed: 'Completed',
+  completed: 'Unloaded: ready for pickup',
 }
 
 /** Offers the next valid steps for this user and runs the confirm screen. */
@@ -132,7 +130,7 @@ function ConfirmStep({
   return (
     <form onSubmit={submit} className="card space-y-4 border-2 border-stone-900">
       <h2 className="text-xl font-bold">
-        {isStart ? 'Start the firing' : `Mark as ${STATUS_LABELS[step].toLowerCase()}`}
+        {isStart ? 'Start the firing' : step === 'completed' ? 'Unloaded and ready for pickup' : `Mark as ${STATUS_LABELS[step].toLowerCase()}`}
       </h2>
 
       {isStart && (
@@ -186,9 +184,9 @@ function ConfirmStep({
           Estimated unload: <strong>{formatWhen(estUnload, tz)}</strong>
         </Alert>
       )}
-      {step === 'ready_for_pickup' && <Alert kind="warning">Everyone with work in this firing will be told it's ready.</Alert>}
+      {step === 'completed' && <Alert kind="warning">Everyone with work in this firing will be told it's ready for pickup.</Alert>}
 
-      {['loaded', 'cooling', 'unloaded', 'firing'].includes(step) && (
+      {['loaded', 'cooling', 'completed', 'firing'].includes(step) && (
         <Field label="Note (optional)">
           <input value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} className={inputClass} />
         </Field>
@@ -212,8 +210,6 @@ const TIME_ROWS: { field: TimestampField; label: string }[] = [
   { field: 'started_at', label: 'Started' },
   { field: 'cooling_at', label: 'Cooling' },
   { field: 'unloaded_at', label: 'Unloaded' },
-  { field: 'ready_for_pickup_at', label: 'Ready for pickup' },
-  { field: 'completed_at', label: 'Completed' },
 ]
 
 /** Lists recorded lifecycle times; kiln masters can correct each one. */
