@@ -1,7 +1,7 @@
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useEffect, useRef, type CSSProperties, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { dayParts } from '../lib/time'
-import type { Firing, FiringStatus, FiringSummary, Fullness, Kiln, Options } from '../lib/types'
+import type { Firing, FiringStatus, FiringSummary, Fullness, Kiln, Options, Participant } from '../lib/types'
 
 /** The kiln's name, but only when there's more than one kiln (otherwise it's noise). */
 export function kilnLabel(options: Options, kilnId: number): string | null {
@@ -23,57 +23,75 @@ export const STATUS_LABELS: Record<FiringStatus, string> = {
   cancelled: 'Cancelled',
 }
 
-const STATUS_STYLES: Record<FiringStatus, string> = {
-  proposed: 'bg-sky-100 text-sky-900',
-  on_hold: 'bg-amber-100 text-amber-900',
-  confirmed: 'bg-green-100 text-green-900',
-  loading: 'bg-indigo-100 text-indigo-900',
-  loaded: 'bg-indigo-100 text-indigo-900',
-  firing: 'bg-red-600 text-white',
-  cooling: 'bg-blue-100 text-blue-900',
-  completed: 'bg-stone-200 text-stone-700',
-  cancelled: 'bg-stone-200 text-stone-500 line-through',
-}
-
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 
 export function firingTitle(f: Pick<Firing, 'title' | 'cone' | 'firing_type'>): string {
   return f.title || `Cone ${f.cone} ${cap(f.firing_type)}`
 }
 
-export function StatusBadge({ status }: { status: FiringStatus }) {
+/** Status lamp. Pass `label` for public wording ("Waiting for more work"). */
+export function StatusBadge({ status, label }: { status: FiringStatus; label?: string }) {
   return (
-    <span className={`inline-block rounded-full px-2.5 py-0.5 text-sm font-semibold ${STATUS_STYLES[status]}`}>
-      {STATUS_LABELS[status]}
+    <span className="kc-status" data-status={status}>
+      {label ?? STATUS_LABELS[status]}
     </span>
   )
 }
 
 // ── Fullness ────────────────────────────────────────────────────────────────
 
-export function FullnessBar({ fullness, large }: { fullness: Fullness; large?: boolean }) {
+export function FullnessBar({
+  fullness,
+  large,
+  caption = 'full',
+}: {
+  fullness: Fullness
+  large?: boolean
+  /** What the line under the meter says; `none` leaves it to the caller. */
+  caption?: 'full' | 'room' | 'none'
+}) {
   const pct = fullness.display_pct
-  const color = pct >= 100 ? 'bg-red-600' : pct >= 75 ? 'bg-orange-500' : 'bg-green-600'
   return (
     <div>
-      <div
-        className={`overflow-hidden rounded-full bg-stone-200 ${large ? 'h-5' : 'h-2.5'}`}
+      <span
+        className={`kc-meter${large ? ' kc-meter--lg' : ''}${pct >= 100 ? ' kc-meter--over' : ''}`}
+        style={{ '--fill': pct } as CSSProperties}
         role="meter"
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={pct}
         aria-label="Kiln fullness"
       >
-        <div className={`h-full ${color}`} style={{ width: `${pct}%` }} />
-      </div>
-      <div className={`mt-1 flex justify-between ${large ? 'text-base' : 'text-sm'} text-stone-600`}>
-        <span>
-          <strong className="text-stone-900">{pct}% full</strong>
-          {fullness.overridden && <span className="ml-1 italic">(set by kiln master)</span>}
+        <span className="kc-meter__track">
+          <span className="kc-meter__bar" />
         </span>
-        <span>{fullness.room_left_pct}% room left</span>
-      </div>
+      </span>
+      {caption !== 'none' && (
+        <div className="kc-meter-caption">
+          {caption === 'full' ? (
+            <span>
+              {pct}% full{fullness.overridden && <span className="kc-muted"> (set by kiln master)</span>}
+            </span>
+          ) : (
+            <span>{fullness.room_left_pct}% room left</span>
+          )}
+        </div>
+      )}
     </div>
+  )
+}
+
+/** Who's in, under a firing's meter: each name with the share it takes up. */
+export function Participants({ people }: { people: Participant[] }) {
+  if (people.length === 0) return null
+  return (
+    <ul className="kc-people">
+      {people.map((p) => (
+        <li key={p.id}>
+          {p.name} <span className="kc-people__share">{p.share_pct}%</span>
+        </li>
+      ))}
+    </ul>
   )
 }
 
@@ -88,7 +106,7 @@ export function KilnFootnote({ kiln }: { kiln: Kiln }) {
   if (text) text += '.'
   if (kiln.share_per_shelf_pct) text += ` One full shelf ≈ ${kiln.share_per_shelf_pct}%.`
   if (!text) text = 'Estimate how much of the kiln your work takes up. A kiln master will check.'
-  return <p className="mt-1 text-sm italic text-stone-500">{text.trim()}</p>
+  return <p className="kc-caption kc-caption--body mt-1">{text.trim()}</p>
 }
 
 // ── Firing card (lists) ─────────────────────────────────────────────────────
@@ -97,24 +115,27 @@ export function FiringCard({ firing, options }: { firing: FiringSummary; options
   const d = dayParts(firing.scheduled_date)
   const kiln = kilnLabel(options, firing.kiln_id)
   return (
-    <Link to={`/firings/${firing.id}`} className="card flex gap-4 active:bg-stone-50">
-      <div className="flex w-14 shrink-0 flex-col items-center justify-center rounded-xl bg-stone-900 py-2 text-white">
-        <span className="text-xs uppercase">{d.weekday}</span>
-        <span className="text-2xl font-bold leading-none">{d.day}</span>
-        <span className="text-xs uppercase">{d.month}</span>
+    <Link to={`/firings/${firing.id}`} className={`kc-plate kc-plate--link${firing.is_mine ? ' kc-plate--mine' : ''}`}>
+      <div className="kc-plate__head">
+        <span className="kc-label kc-label--date">
+          {d.weekday} {d.month} {d.day}
+        </span>
+        <StatusBadge status={firing.status} />
       </div>
-      <div className="min-w-0 flex-1 space-y-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <h3 className="truncate text-lg font-bold">{firingTitle(firing)}</h3>
-          <StatusBadge status={firing.status} />
-        </div>
-        <p className="text-sm text-stone-600">
-          {kiln && `${kiln} · `}by {firing.proposer.name}
+      <div className="kc-plate__body kc-plate__body--tight">
+        <h3 className="kc-title kc-title--sm">
+          {firingTitle(firing)}
           {firing.pending_count > 0 && (
-            <span className="ml-2 font-semibold text-orange-700">{firing.pending_count} pending</span>
+            <span className="kc-tag kc-tag--flag ml-2 align-middle">{firing.pending_count} pending</span>
           )}
-        </p>
-        {firing.status !== 'cancelled' && <FullnessBar fullness={firing.fullness} />}
+        </h3>
+        {kiln && <p className="kc-caption kc-caption--body">{kiln}</p>}
+        {firing.status !== 'cancelled' && (
+          <>
+            <FullnessBar fullness={firing.fullness} caption="none" />
+            <Participants people={firing.participants} />
+          </>
+        )}
       </div>
     </Link>
   )
@@ -122,44 +143,36 @@ export function FiringCard({ firing, options }: { firing: FiringSummary; options
 
 // ── Form bits ───────────────────────────────────────────────────────────────
 
-export const inputClass =
-  'mt-1 block w-full rounded-xl border-2 border-stone-300 bg-white px-3 py-3 text-lg focus:border-orange-600 focus:outline-none'
+export const inputClass = 'kc-input'
+export const smallInputClass = 'kc-input kc-input--sm'
 
 export function Field({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
   return (
-    <label className="block">
-      <span className="font-semibold">{label}</span>
+    <label className="kc-field">
+      <span className="kc-field__label">{label}</span>
       {children}
-      {hint}
+      {hint && <span className="kc-field__hint">{hint}</span>}
     </label>
   )
 }
 
-/** Big tappable share picker: a slider plus quick buttons. */
+/** Big tappable share picker: quick presets, glove-friendly. */
 export function ShareInput({ value, onChange, kiln }: { value: number; onChange: (v: number) => void; kiln: Kiln | undefined }) {
   const presets = [10, 25, 50, 75, 100]
   return (
-    <div>
-      <div className="flex items-baseline justify-between">
-        <span className="font-semibold">How much of the kiln?</span>
-        <span className="text-2xl font-bold tabular-nums">{value}%</span>
+    <div className="space-y-2">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="kc-field__label kc-field__label--flush">How much of the kiln?</span>
+        <span className="kc-value">{value}%</span>
       </div>
-      <input
-        type="range"
-        min={1}
-        max={100}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="mt-2 h-10 w-full accent-orange-600"
-        aria-label="Share of the kiln in percent"
-      />
-      <div className="mt-1 grid grid-cols-5 gap-2">
+      <div className="grid grid-cols-5 gap-2">
         {presets.map((p) => (
           <button
             key={p}
             type="button"
             onClick={() => onChange(p)}
-            className={`rounded-lg border-2 py-2 font-semibold ${value === p ? 'border-orange-600 bg-orange-50' : 'border-stone-300 bg-white'}`}
+            aria-pressed={value === p}
+            className="kc-key kc-key--sm"
           >
             {p}%
           </button>
@@ -173,26 +186,32 @@ export function ShareInput({ value, onChange, kiln }: { value: number; onChange:
 export function ConeSelect({ value, onChange, cones, label = 'Cone' }: { value: string; onChange: (v: string) => void; cones: string[]; label?: string }) {
   return (
     <Field label={label}>
-      <select value={value} onChange={(e) => onChange(e.target.value)} className={inputClass}>
-        {cones.map((c) => (
-          <option key={c} value={c}>
-            Cone {c}
-          </option>
-        ))}
-      </select>
+      <span className="kc-select-wrap">
+        <select value={value} onChange={(e) => onChange(e.target.value)} className="kc-select">
+          {cones.map((c) => (
+            <option key={c} value={c}>
+              Cone {c}
+            </option>
+          ))}
+        </select>
+      </span>
     </Field>
   )
 }
 
 export function Alert({ kind, children }: { kind: 'error' | 'warning' | 'info'; children: ReactNode }) {
   const styles = {
-    error: 'border-red-300 bg-red-50 text-red-900',
-    warning: 'border-amber-300 bg-amber-50 text-amber-900',
-    info: 'border-sky-300 bg-sky-50 text-sky-900',
+    error: 'kc-placard--refused',
+    warning: 'kc-placard--caution',
+    info: '',
   }[kind]
+  const tag = { error: '!', warning: '!', info: 'Note' }[kind]
   return (
-    <div role={kind === 'error' ? 'alert' : 'status'} className={`rounded-xl border-2 p-3 font-medium ${styles}`}>
-      {children}
+    <div role={kind === 'error' ? 'alert' : 'status'} className={`kc-placard ${styles}`}>
+      <span className="kc-placard__tag" aria-hidden>
+        {tag}
+      </span>
+      <div className="kc-placard__text">{children}</div>
     </div>
   )
 }
@@ -211,13 +230,13 @@ export function Sheet({ title, open, onClose, children }: { title: string; open:
       ref={ref}
       onClose={onClose}
       onClick={(e) => e.target === ref.current && onClose()}
-      className="mx-auto mb-0 mt-auto w-full max-w-xl rounded-t-2xl bg-white p-0 backdrop:bg-black/50"
+      className="kc-sheet"
     >
       {open && (
-        <div className="space-y-4 p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-bold">{title}</h2>
-            <button type="button" onClick={onClose} className="rounded-lg px-3 py-2 text-stone-500" aria-label="Close">
+        <div className="kc-sheet__body">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="kc-title kc-title--sm">{title}</h2>
+            <button type="button" onClick={onClose} className="kc-sheet__close" aria-label="Close">
               ✕
             </button>
           </div>

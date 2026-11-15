@@ -5,18 +5,18 @@ export default function Layout() {
   const { me } = useSession()
   return (
     <div className="mx-auto flex min-h-dvh max-w-xl flex-col">
-      <header className="sticky top-0 z-10 flex items-center justify-between bg-stone-900 px-4 py-3 text-white pt-[max(0.75rem,env(safe-area-inset-top))]">
-        <Link to="/" className="flex items-center gap-2 text-lg font-bold">
+      <header className="kc-header">
+        <Link to="/" className="kc-header__brand">
           <img src="/favicon.svg" alt="" className="size-7" />
           KilnLab
         </Link>
         {me ? (
-          <Link to="/" className="flex items-center gap-2 text-sm text-stone-300">
-            {me.avatar_url && <img src={me.avatar_url} alt="" className="size-8 rounded-full" />}
-            <span className="max-w-[10rem] truncate">{me.display_name}</span>
-          </Link>
+          <div className="kc-header__user">
+            {me.avatar_url && <img src={me.avatar_url} alt="" className="kc-avatar size-8" />}
+            <span className="kc-header__name">{me.display_name}</span>
+          </div>
         ) : (
-          <Link to="/login" className="rounded-lg px-3 py-2 text-sm font-semibold text-orange-300">
+          <Link to="/login" className="kc-key kc-key--sm kc-key--fire">
             Sign in
           </Link>
         )}

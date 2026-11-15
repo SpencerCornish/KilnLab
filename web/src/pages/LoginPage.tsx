@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Navigate, useNavigate, useSearchParams } from 'react-router'
+import { Alert } from '../components/firing'
 import { devLogin, getAuthProviders, loginURL } from '../lib/api'
 import { PageSpinner, useSession } from '../lib/session'
 import type { AuthProviders } from '../lib/types'
@@ -41,19 +42,15 @@ export default function LoginPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">Sign in</h1>
-        <p className="mt-1 text-stone-600">Use the community you belong to.</p>
+        <h1 className="kc-title">Sign in</h1>
+        <p className="kc-caption kc-caption--body mt-1">Use the community you belong to.</p>
       </div>
 
-      {error && (
-        <div role="alert" className="rounded-xl border-2 border-red-300 bg-red-50 p-4 font-medium text-red-900">
-          {error}
-        </div>
-      )}
+      {error && <Alert kind="error">{error}</Alert>}
 
-      <div className="space-y-3">
+      <div className="space-y-2">
         {providers.discord && (
-          <a href={loginURL('discord', returnTo)} className="btn bg-[#5865F2] text-white">
+          <a href={loginURL('discord', returnTo)} className="kc-key kc-key--block kc-key--lg kc-key--cobalt">
             <DiscordIcon />
             <span>
               ArtLab <span className="font-normal opacity-90">· Discord</span>
@@ -61,7 +58,7 @@ export default function LoginPage() {
           </a>
         )}
         {providers.slack && (
-          <a href={loginURL('slack', returnTo)} className="btn border-2 border-stone-900 bg-white text-stone-900">
+          <a href={loginURL('slack', returnTo)} className="kc-key kc-key--block kc-key--lg">
             <SlackIcon />
             <span>
               BMS <span className="font-normal opacity-70">· Slack</span>
@@ -69,7 +66,7 @@ export default function LoginPage() {
           </a>
         )}
         {!providers.discord && !providers.slack && !providers.dev && (
-          <p className="text-stone-600">No sign-in methods are configured.</p>
+          <p className="kc-caption kc-caption--body">No sign-in methods are configured.</p>
         )}
       </div>
 
@@ -104,42 +101,37 @@ function DevLoginForm({ returnTo }: { returnTo: string }) {
   }
 
   return (
-    <form onSubmit={submit} className="card space-y-4 border-2 border-dashed border-amber-400 bg-amber-50">
+    <form onSubmit={submit} className="kc-plate kc-plate--pad kc-plate--dashed space-y-4">
       <div>
-        <h2 className="font-bold text-amber-900">Dev login</h2>
-        <p className="text-sm text-amber-800">DEV_LOGIN is on. Sign in as anyone. Never enable in production.</p>
+        <h2 className="kc-label">Dev login</h2>
+        <p className="kc-caption kc-caption--body mt-1">DEV_LOGIN is on. Sign in as anyone. Never enable in production.</p>
       </div>
-      <label className="block">
-        <span className="text-sm font-medium">Name</span>
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          className="mt-1 block w-full rounded-lg border border-stone-300 px-3 py-3 text-lg"
-          required
-          maxLength={60}
-        />
+      <label className="kc-field">
+        <span className="kc-field__label">Name</span>
+        <input value={name} onChange={(e) => setName(e.target.value)} className="kc-input" required maxLength={60} />
       </label>
-      <div className="flex gap-2">
+      <div className="kc-keys kc-keys--fill">
         {(['artlab', 'bms'] as const).map((c) => (
           <button
             key={c}
             type="button"
+            aria-pressed={community === c}
             onClick={() => {
               setCommunity(c)
               if (c === 'bms') setKilnMaster(false)
             }}
-            className={`flex-1 rounded-lg border-2 py-3 font-semibold ${community === c ? 'border-stone-900 bg-stone-900 text-white' : 'border-stone-300 bg-white'}`}
+            className="kc-key"
           >
             {c === 'artlab' ? 'ArtLab (Discord)' : 'BMS (Slack)'}
           </button>
         ))}
       </div>
-      <div className="space-y-2">
+      <div>
         <Check label="Kiln master" checked={kilnMaster} onChange={setKilnMaster} disabled={community === 'bms'} />
         <Check label="Admin" checked={admin} onChange={setAdmin} />
       </div>
-      {err && <p className="text-sm text-red-700">{err}</p>}
-      <button disabled={busy} className="btn bg-amber-500 text-stone-900">
+      {err && <Alert kind="error">{err}</Alert>}
+      <button disabled={busy} className="kc-key kc-key--block">
         Sign in as {name || '…'}
       </button>
     </form>
@@ -148,10 +140,10 @@ function DevLoginForm({ returnTo }: { returnTo: string }) {
 
 function Check(props: { label: string; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
   return (
-    <label className={`flex items-center gap-3 text-lg ${props.disabled ? 'opacity-40' : ''}`}>
+    <label className={`kc-check ${props.disabled ? 'opacity-40' : ''}`}>
       <input
         type="checkbox"
-        className="size-6 accent-stone-900"
+        className="kc-checkbox"
         checked={props.checked}
         disabled={props.disabled}
         onChange={(e) => props.onChange(e.target.checked)}

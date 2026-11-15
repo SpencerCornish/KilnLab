@@ -47,12 +47,12 @@ export function LifecyclePanel({
     return blocked ? <Alert kind="info">{blocked}</Alert> : null
   }
   return (
-    <div className="grid gap-3">
+    <div className="kc-keys">
       {steps.map((s) => (
         <button
           key={s}
           onClick={() => setStep(s)}
-          className={`btn ${s === 'firing' ? 'min-h-20 bg-red-600 text-2xl tracking-wide text-white' : 'bg-stone-900 text-white'}`}
+          className={`kc-key kc-key--block ${s === 'firing' ? 'kc-key--fire kc-key--lg' : ''}`}
         >
           {STEP_LABELS[s] ?? STATUS_LABELS[s]}
         </button>
@@ -128,8 +128,8 @@ function ConfirmStep({
   }
 
   return (
-    <form onSubmit={submit} className="card space-y-4 border-2 border-stone-900">
-      <h2 className="text-xl font-bold">
+    <form onSubmit={submit} className="kc-plate kc-plate--pad kc-plate--strong space-y-4">
+      <h2 className="kc-title kc-title--sm">
         {isStart ? 'Start the firing' : step === 'completed' ? 'Unloaded and ready for pickup' : `Mark as ${STATUS_LABELS[step].toLowerCase()}`}
       </h2>
 
@@ -137,14 +137,16 @@ function ConfirmStep({
         <>
           <Field label="Program">
             {options.programs.length > 0 && (
-              <select value={program} onChange={(e) => pickProgram(e.target.value)} className={inputClass}>
-                {options.programs.map((p) => (
-                  <option key={p.name} value={p.name}>
-                    {p.name}
-                  </option>
-                ))}
-                <option value="__other">Other…</option>
-              </select>
+              <span className="kc-select-wrap">
+                <select value={program} onChange={(e) => pickProgram(e.target.value)} className="kc-select">
+                  {options.programs.map((p) => (
+                    <option key={p.name} value={p.name}>
+                      {p.name}
+                    </option>
+                  ))}
+                  <option value="__other">Other…</option>
+                </select>
+              </span>
             )}
             {(program === '__other' || options.programs.length === 0) && (
               <input
@@ -167,14 +169,14 @@ function ConfirmStep({
               step={0.25}
               value={hours}
               onChange={(e) => setHours(e.target.value)}
-              className={inputClass}
+              className={`${inputClass} kc-input--number`}
             />
           </Field>
         </>
       )}
 
       {detail.can.backdate && (
-        <Field label="When" hint={<p className="mt-1 text-sm text-stone-500">Change this if it actually happened earlier.</p>}>
+        <Field label="When" hint={<span className="kc-caption kc-caption--body block">Change this if it actually happened earlier.</span>}>
           <input type="datetime-local" required value={when} onChange={(e) => setWhen(e.target.value)} className={inputClass} />
         </Field>
       )}
@@ -194,10 +196,10 @@ function ConfirmStep({
 
       {err && <Alert kind="error">{err}</Alert>}
 
-      <button type="submit" disabled={busy} className={`btn text-white ${isStart ? 'bg-red-600' : 'bg-orange-600'}`}>
+      <button type="submit" disabled={busy} className={`kc-key kc-key--block ${isStart ? 'kc-key--fire' : ''}`}>
         {busy ? 'Saving…' : `Confirm: ${STEP_LABELS[step] ?? STATUS_LABELS[step]}`}
       </button>
-      <button type="button" onClick={onCancel} className="btn text-base text-stone-600">
+      <button type="button" onClick={onCancel} className="kc-key kc-key--block">
         Back
       </button>
     </form>
@@ -206,53 +208,11 @@ function ConfirmStep({
 
 // ── Recorded times + corrections ────────────────────────────────────────────
 
-const TIME_ROWS: { field: TimestampField; label: string }[] = [
+export const TIME_ROWS: { field: TimestampField; label: string }[] = [
   { field: 'started_at', label: 'Started' },
   { field: 'cooling_at', label: 'Cooling' },
   { field: 'unloaded_at', label: 'Unloaded' },
 ]
-
-/** Lists recorded lifecycle times; kiln masters can correct each one. */
-export function RecordedTimes({
-  detail,
-  tz,
-  onCorrect,
-}: {
-  detail: FiringDetail
-  tz: string
-  onCorrect: (field: TimestampField) => void
-}) {
-  const f = detail.firing
-  const rows = TIME_ROWS.filter((r) => f[r.field])
-  if (rows.length === 0) return null
-  return (
-    <div className="card divide-y divide-stone-200 py-2">
-      {f.program && (
-        <p className="py-2 text-stone-700">
-          Program: <strong>{f.program}</strong>
-          {f.estimated_duration_minutes && ` · about ${Math.round((f.estimated_duration_minutes / 60) * 10) / 10}h`}
-        </p>
-      )}
-      {f.estimated_unload_at && !f.unloaded_at && (
-        <p className="py-2">
-          Estimated unload: <strong>{formatWhen(f.estimated_unload_at, tz)}</strong>
-        </p>
-      )}
-      {rows.map((r) => (
-        <div key={r.field} className="flex items-center justify-between gap-2 py-2">
-          <span>
-            <span className="text-stone-500">{r.label}:</span> {formatWhen(f[r.field]!, tz)}
-          </span>
-          {detail.can.correct_timestamps && (
-            <button onClick={() => onCorrect(r.field)} className="rounded-lg px-3 py-2 text-sm font-semibold text-orange-700">
-              Fix
-            </button>
-          )}
-        </div>
-      ))}
-    </div>
-  )
-}
 
 export function CorrectTimeForm({
   detail,
@@ -282,9 +242,9 @@ export function CorrectTimeForm({
         <input type="datetime-local" required value={value} onChange={(e) => setValue(e.target.value)} className={inputClass} />
       </Field>
       {field === 'started_at' && detail.firing.estimated_duration_minutes && (
-        <p className="text-sm text-stone-600">The estimated unload time moves with it.</p>
+        <p className="kc-caption kc-caption--body">The estimated unload time moves with it.</p>
       )}
-      <button type="submit" disabled={busy} className="btn bg-orange-600 text-white">
+      <button type="submit" disabled={busy} className="kc-key kc-key--block kc-key--fire">
         {busy ? 'Saving…' : 'Save time'}
       </button>
     </form>

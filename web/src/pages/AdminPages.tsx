@@ -9,32 +9,28 @@ import { useLoad } from '../lib/useLoad'
 
 export function AdminIndexPage() {
   const { me } = useSession()
-  if (!me || !(me.roles.kiln_master || me.roles.admin)) return <Navigate to="/" replace />
+  if (!me?.roles.admin) return <Navigate to="/" replace />
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-bold">Admin</h1>
-      {me.roles.admin && (
-        <>
-          <Link to="/admin/users" className="btn bg-stone-900 text-white">
-            People
-          </Link>
-          <Link to="/admin/settings" className="btn bg-stone-900 text-white">
-            Studio settings &amp; kilns
-          </Link>
-          <Link to="/admin/qr" className="btn border-2 border-stone-900 bg-white">
-            Printable QR codes
-          </Link>
-          <NotificationLogSection />
-        </>
-      )}
+      <h1 className="kc-title">Admin</h1>
+      <Link to="/admin/users" className="kc-key kc-key--block">
+        People
+      </Link>
+      <Link to="/admin/settings" className="kc-key kc-key--block">
+        Studio settings &amp; kilns
+      </Link>
+      <Link to="/admin/qr" className="kc-key kc-key--block">
+        Printable QR codes
+      </Link>
+      <NotificationLogSection />
     </div>
   )
 }
 
 const OUTBOX_STATUS: Record<OutboxItem['status'], string> = {
-  pending: 'bg-amber-100 text-amber-900',
-  sent: 'bg-green-100 text-green-900',
-  failed: 'bg-red-100 text-red-900',
+  pending: 'kc-tag--flag',
+  sent: 'kc-tag--go',
+  failed: 'kc-tag--stop',
 }
 
 function NotificationLogSection() {
@@ -46,31 +42,31 @@ function NotificationLogSection() {
     : [data.discord ? 'Discord on' : 'Discord off (no bot token)', data.slack ? 'Slack on' : 'Slack off (no bot token)'].join(' · ')
   return (
     <section className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold">Notifications</h2>
-        <button onClick={() => void reload()} className="rounded-lg px-3 py-2 text-sm font-semibold text-orange-700">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="kc-title kc-title--sm">Notifications</h2>
+        <button onClick={() => void reload()} className="kc-key kc-key--sm">
           Refresh
         </button>
       </div>
-      <p className="text-sm text-stone-600">{mode}</p>
-      {data.items.length === 0 && <p className="text-stone-500">Nothing sent yet.</p>}
+      <p className="kc-caption kc-caption--body">{mode}</p>
+      {data.items.length === 0 && <p className="kc-caption kc-caption--body">Nothing sent yet.</p>}
       <ul className="space-y-2">
         {data.items.map((o) => (
-          <li key={o.id} className="card space-y-1 py-3">
-            <div className="flex flex-wrap items-center gap-2 text-sm">
-              <span className={`rounded-full px-2 py-0.5 font-semibold ${OUTBOX_STATUS[o.status]}`}>{o.status}</span>
-              <span className="font-semibold capitalize">{o.platform}</span>
-              <span className="text-stone-600">
+          <li key={o.id} className="kc-plate kc-plate--pad space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`kc-tag ${OUTBOX_STATUS[o.status]}`}>{o.status}</span>
+              <span className="kc-label capitalize">{o.platform}</span>
+              <span className="kc-data kc-muted">
                 {o.kind === 'dm' ? 'DM' : 'channel message'}
                 {o.payload.firing_id ? ` · firing #${o.payload.firing_id}` : ''}
               </span>
-              <span className="ml-auto text-stone-500">{relative(o.created_at)}</span>
+              <span className="kc-data kc-muted ml-auto">{relative(o.created_at)}</span>
             </div>
             {(o.payload.text || o.payload.thread) && (
-              <p className="line-clamp-2 text-sm text-stone-700">{o.payload.text ?? `Thread: ${o.payload.thread}`}</p>
+              <p className="line-clamp-2 kc-caption kc-caption--body">{o.payload.text ?? `Thread: ${o.payload.thread}`}</p>
             )}
             {o.last_error && (
-              <p className="text-sm text-red-800">
+              <p className="kc-warning">
                 {o.attempts} attempt{o.attempts === 1 ? '' : 's'}: {o.last_error}
               </p>
             )}
@@ -126,34 +122,36 @@ export function AdminUsersPage() {
 
   return (
     <div className="space-y-4">
-      <Link to="/admin" className="text-sm font-semibold text-stone-500">
+      <Link to="/admin" className="kc-back">
         ← Admin
       </Link>
-      <h1 className="text-2xl font-bold">People</h1>
-      <p className="text-stone-600">Admins can manage studio settings and other admins. Kiln masters come from the Kiln Master role in Discord.
-        People who leave the Discord server or Slack workspace are signed out automatically within about an hour.</p>
+      <h1 className="kc-title">People</h1>
+      <p className="kc-caption kc-caption--body">
+        Admins can manage studio settings and other admins. Kiln masters come from the Kiln Master role in Discord.
+        People who leave the Discord server or Slack workspace are signed out automatically within about an hour.
+      </p>
       <input
         type="search"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder="Search names"
-        className="block w-full rounded-xl border-2 border-stone-300 bg-white px-3 py-3 text-lg"
+        className="kc-input"
       />
       {err && <Alert kind="error">{err}</Alert>}
       <ul className="space-y-3">
         {users.map((u) => (
-          <li key={u.id} className="card space-y-3">
+          <li key={u.id} className="kc-plate kc-plate--pad space-y-3">
             <div className="flex items-center gap-3">
-              {u.avatar_url && <img src={u.avatar_url} alt="" className="size-10 rounded-full" />}
+              {u.avatar_url && <img src={u.avatar_url} alt="" className="kc-avatar size-10" />}
               <div className="min-w-0">
-                <p className="truncate text-lg font-semibold">{u.display_name}</p>
-                <p className="text-sm text-stone-500">
+                <p className="kc-label kc-label--lg truncate">{u.display_name}</p>
+                <p className="kc-caption kc-caption--body">
                   {u.community === 'artlab' ? 'ArtLab · Discord' : 'BMS · Slack'} · last seen {relative(u.last_login_at)}
                   {u.is_kiln_master && ' · Kiln master'}
                 </p>
               </div>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="kc-keys">
               <Toggle
                 label="Admin"
                 on={u.is_admin}
@@ -164,7 +162,7 @@ export function AdminUsersPage() {
                 type="button"
                 disabled={busy === u.id}
                 onClick={() => signOut(u)}
-                className="rounded-xl border-2 border-stone-300 bg-white px-4 py-2 font-semibold text-stone-700 disabled:opacity-50"
+                className="kc-key kc-key--sm"
               >
                 Sign out
               </button>
@@ -184,7 +182,7 @@ function Toggle({ label, on, disabled, onChange }: { label: string; on: boolean;
       aria-checked={on}
       disabled={disabled}
       onClick={() => onChange(!on)}
-      className={`min-h-12 rounded-full border-2 px-4 font-semibold disabled:opacity-50 ${on ? 'border-green-700 bg-green-700 text-white' : 'border-stone-300 bg-white text-stone-700'}`}
+      className={`kc-key kc-key--sm${on ? ' kc-key--selected' : ''}`}
     >
       {on ? '✓ ' : ''}
       {label}

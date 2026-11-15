@@ -25,29 +25,32 @@ export function KilnPage() {
 
   return (
     <div className="space-y-5">
-      <h1 className="text-2xl font-bold">{view.kiln ? view.kiln.name : 'Kiln check-in'}</h1>
+      <h1 className="kc-title">{view.kiln ? view.kiln.name : 'Kiln check-in'}</h1>
       {view.firings.length === 0 ? (
-        <div className="card space-y-4 text-center">
-          <p className="text-xl font-semibold">No active firing</p>
-          <p className="text-stone-600">Nothing is loading or running, and nothing confirmed starts within a day.</p>
-          <Link to="/" className="btn bg-orange-600 text-white">
+        <div className="kc-plate kc-plate--pad space-y-4 text-center">
+          <p className="kc-title kc-title--sm">No active firing</p>
+          <p className="kc-caption kc-caption--body">Nothing is loading or running, and nothing confirmed starts within a day.</p>
+          <Link to="/" className="kc-key kc-key--block kc-key--fire">
             See the schedule
           </Link>
         </div>
       ) : (
         <>
-          <p className="text-stone-600">Which firing?</p>
+          <p className="kc-caption kc-caption--body">Which firing?</p>
           <div className="space-y-3">
             {view.firings.map((f) => (
-              <Link key={f.id} to={`/kiln/${f.id}${suffix}`} className="card block space-y-1 active:bg-stone-50">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-lg font-bold">{firingTitle(f)}</span>
+              <Link key={f.id} to={`/kiln/${f.id}${suffix}`} className="kc-plate kc-plate--link">
+                <div className="kc-plate__head">
+                  <span className="kc-label kc-label--date">{formatDate(f.scheduled_date)}</span>
                   <StatusBadge status={f.status} />
                 </div>
-                <p className="text-stone-600">
-                  {formatDate(f.scheduled_date)}
-                  {!view.kiln && kilnLabel(options, f.kiln_id) && ` · ${kilnLabel(options, f.kiln_id)}`} · {f.proposer_name}
-                </p>
+                <div className="kc-plate__body kc-plate__body--tight">
+                  <p className="kc-title kc-title--sm">{firingTitle(f)}</p>
+                  <p className="kc-caption kc-caption--body">
+                    {!view.kiln && kilnLabel(options, f.kiln_id) && `${kilnLabel(options, f.kiln_id)} · `}
+                    {f.proposer_name}
+                  </p>
+                </div>
               </Link>
             ))}
           </div>
@@ -80,43 +83,50 @@ export function KilnFiringPage() {
   return (
     <div className="space-y-5">
       {done && (
-        <div role="status" className="rounded-2xl bg-green-700 p-5 text-center text-white">
-          <p className="text-3xl">✓</p>
-          <p className="text-xl font-bold">{STEP_LABELS[done] ?? STATUS_LABELS[done]}</p>
-          <p className="mt-1 opacity-90">Saved {formatWhen(new Date().toISOString(), tz)}</p>
+        <div role="status" className="kc-placard kc-placard--ok">
+          <span className="kc-placard__tag" aria-hidden>
+            ✓
+          </span>
+          <div className="kc-placard__text">
+            <p className="kc-title kc-title--sm">{STEP_LABELS[done] ?? STATUS_LABELS[done]}</p>
+            <p className="kc-caption kc-caption--body">Saved {formatWhen(new Date().toISOString(), tz)}</p>
+          </div>
         </div>
       )}
 
-      <section className="card space-y-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <h1 className="text-2xl font-bold">{firingTitle(f)}</h1>
+      <section className="kc-plate">
+        <header className="kc-plate__head">
+          <span className="kc-label kc-label--date">{formatDate(f.scheduled_date)}</span>
           <StatusBadge status={f.status} />
-        </div>
-        <p className="text-lg">{formatDate(f.scheduled_date)}</p>
-        <p className="text-stone-600">
-          {kilnLabel(options, f.kiln_id) && `${kilnLabel(options, f.kiln_id)} · `}
-          {f.fullness.display_pct}% full · {1 + detail.requests.filter((r) => r.status === 'approved').length} people
-        </p>
-        {f.status === 'firing' && f.estimated_unload_at && (
-          <p className="text-lg">
-            Estimated unload: <strong>{formatWhen(f.estimated_unload_at, tz)}</strong>
+        </header>
+        <div className="kc-plate__body kc-plate__body--tight">
+          <h1 className="kc-title kc-title--sm">{firingTitle(f)}</h1>
+          <p className="kc-data">
+            {kilnLabel(options, f.kiln_id) && `${kilnLabel(options, f.kiln_id)} · `}
+            {f.fullness.display_pct}% full · {1 + detail.requests.filter((r) => r.status === 'approved').length} people
           </p>
-        )}
-        {f.program && <p className="text-stone-600">Program: {f.program}</p>}
+          {f.status === 'firing' && f.estimated_unload_at && (
+            <div className="kc-readout">
+              <span className="kc-readout__label">Estimated unload</span>
+              <span className="kc-readout__value">{formatWhen(f.estimated_unload_at, tz)}</span>
+            </div>
+          )}
+          {f.program && <p className="kc-data kc-muted">Program: {f.program}</p>}
+        </div>
       </section>
 
       {!done && <LifecyclePanel detail={detail} options={options} source="kiln_qr" onDone={onDone} />}
       {done && detail.can.next_steps.length > 0 && (
-        <button onClick={() => setDone(null)} className="btn border-2 border-stone-900 bg-white">
+        <button onClick={() => setDone(null)} className="kc-key kc-key--block">
           Next step
         </button>
       )}
 
-      <div className="grid grid-cols-2 gap-3">
-        <Link to={`/firings/${f.id}`} className="btn border-2 border-stone-300 bg-white text-base">
+      <div className="kc-keys kc-keys--fill">
+        <Link to={`/firings/${f.id}`} className="kc-key">
           Firing details
         </Link>
-        <Link to={`/kiln${k ? `?k=${encodeURIComponent(k)}` : ''}`} className="btn border-2 border-stone-300 bg-white text-base">
+        <Link to={`/kiln${k ? `?k=${encodeURIComponent(k)}` : ''}`} className="kc-key">
           Other firings
         </Link>
       </div>

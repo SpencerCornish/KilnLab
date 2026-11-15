@@ -55,6 +55,8 @@ default currently in use. When the owner answers a question, move it to Decision
 | D45 | 2026-11-14 | Sign-in start/callback are limited to 30 per minute per client IP, in memory. Expired sessions and OAuth states are deleted on each jobs tick | Starting sign-in writes a row without a login |
 | D46 | 2026-11-14 | Plain messages (DMs, thread replies) are escaped at send time: Slack `& < >`, Discord `[ ] \` | Member-written titles and reasons could render as disguised links |
 | D23 | 2026-11-11 | Datetimes are entered and shown in `settings.timezone`, not the phone's timezone. Binary embeds `time/tzdata` | Everyone sees studio wall time |
+| D47 | 2026-11-14 | Adopt the **Kiln Control** design system: plain `kc-*` CSS classes and tokens in `web/src/styles/`, with Tailwind kept for layout utilities. Fonts (Barlow, Barlow Condensed, Share Tech Mono) are self-hosted in `web/public/fonts/` | Owner supplied the system. Self-hosting keeps the server's strict CSP and removes external font requests. 56px tap targets (48px compact) suit gloved studio hands |
+| D48 | 2026-11-14 | Slack main messages carry the firing's status colour by moving their Block Kit into a **legacy attachment** whose `color` is `statusColors[status]` — the same value Discord already puts on its embed. Cards with no colour get no bar. The plain text moves to the attachment's `fallback`; there is no top-level `text`, which Slack would otherwise show above the attachment | Block Kit has no colour of its own; the attachment is the only place Slack renders one. Otherwise "firing" and "on hold" looked identical on Slack while Discord showed a red/amber strip |
 
 ---
 

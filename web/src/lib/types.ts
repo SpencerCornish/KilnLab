@@ -80,10 +80,18 @@ export interface Firing {
 
 export type TimestampField = 'started_at' | 'cooling_at' | 'unloaded_at'
 
+export interface Participant {
+  id: number
+  name: string
+  share_pct: number
+}
+
 export interface FiringSummary extends Firing {
   approved_count: number
   pending_count: number
   is_mine: boolean
+  /** Everyone with work in the firing, biggest share first. */
+  participants: Participant[]
 }
 
 export interface FiringRequest {

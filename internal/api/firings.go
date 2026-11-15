@@ -181,6 +181,14 @@ type firingSummaryDTO struct {
 	ApprovedCount int32 `json:"approved_count"`
 	PendingCount  int32 `json:"pending_count"`
 	IsMine        bool  `json:"is_mine"` // I proposed it or have a live request in it
+	// Everyone with work in it, biggest share first. Powers the list card.
+	Participants []participantDTO `json:"participants"`
+}
+
+type participantDTO struct {
+	ID       int64  `json:"id"`
+	Name     string `json:"name"`
+	SharePct int32  `json:"share_pct"`
 }
 
 type requestDTO struct {
@@ -437,13 +445,32 @@ func (s *Server) handleListFirings(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
+	ids := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.Firing.ID)
+	}
+	participants, err := s.queries.ListFiringParticipants(r.Context(), ids)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	byFiring := make(map[int64][]participantDTO, len(rows))
+	for _, p := range participants {
+		byFiring[p.FiringID] = append(byFiring[p.FiringID], participantDTO{ID: p.UserID, Name: p.Name, SharePct: p.SharePct})
+	}
+
 	out := make([]firingSummaryDTO, 0, len(rows))
 	for _, row := range rows {
 		approved := []int32{row.ApprovedSharePct} // the sum is all fullness needs
+		people := byFiring[row.Firing.ID]
+		if people == nil {
+			people = []participantDTO{} // always a list in JSON, never null
+		}
 		out = append(out, firingSummaryDTO{
 			firingDTO:     s.toFiringDTO(row.Firing, row.ProposerName, approved),
 			ApprovedCount: row.ApprovedCount, PendingCount: row.PendingCount,
-			IsMine: row.Firing.ProposedByUserID == u.ID || row.HasMyRequest,
+			IsMine:       row.Firing.ProposedByUserID == u.ID || row.HasMyRequest,
+			Participants: people,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
