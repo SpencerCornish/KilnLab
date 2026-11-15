@@ -370,13 +370,14 @@ func toKilnDTO(k db.Kiln) kilnDTO {
 }
 
 type optionsDTO struct {
-	Timezone           string       `json:"timezone"`
-	MinNoticeHours     int32        `json:"min_notice_hours"`
-	RequestCutoffHours int32        `json:"request_cutoff_hours"`
-	FiringTypes        []string     `json:"firing_types"`
-	Cones              []string     `json:"cones"`
-	Kilns              []kilnDTO    `json:"kilns"` // active first; inactive kept for old firings
-	Programs           []programDTO `json:"programs"`
+	Timezone           string        `json:"timezone"`
+	MinNoticeHours     int32         `json:"min_notice_hours"`
+	RequestCutoffHours int32         `json:"request_cutoff_hours"`
+	FiringTypes        []string      `json:"firing_types"`
+	Cones              []string      `json:"cones"`
+	Kilns              []kilnDTO     `json:"kilns"` // active first; inactive kept for old firings
+	Programs           []programDTO  `json:"programs"`
+	Blackouts          []blackoutDTO `json:"blackouts"` // dates each kiln can't take new firings
 }
 
 // handleOptions returns the settings the propose/request forms need.
@@ -392,13 +393,21 @@ func (s *Server) handleOptions(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
+	blackouts, err := s.queries.ListBlackouts(ctx)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
 	out := optionsDTO{
 		Timezone: st.Timezone, MinNoticeHours: st.MinNoticeHours, RequestCutoffHours: st.RequestCutoffHours,
 		FiringTypes: st.FiringTypes, Cones: st.Cones, Kilns: make([]kilnDTO, 0, len(kilns)),
-		Programs: parsePrograms(st.Programs),
+		Programs: parsePrograms(st.Programs), Blackouts: make([]blackoutDTO, 0, len(blackouts)),
 	}
 	for _, k := range kilns {
 		out.Kilns = append(out.Kilns, toKilnDTO(k))
+	}
+	for _, b := range blackouts {
+		out.Blackouts = append(out.Blackouts, toBlackoutDTO(b))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -542,6 +551,9 @@ func (s *Server) handleCreateFiring(w http.ResponseWriter, r *http.Request) {
 		loc := s.studioLocation(ctx, q)
 		if !firing.DayEnd(day, loc).After(s.now()) {
 			return badRequest("that day has already passed")
+		}
+		if err := s.requireAvailable(ctx, q, kiln.ID, day); err != nil {
+			return err
 		}
 		p.ScheduledDate = day
 		start := firing.DayStart(day, loc)

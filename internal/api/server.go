@@ -111,6 +111,9 @@ func (s *Server) Handler() http.Handler {
 			r.Put("/admin/settings", s.handleUpdateSettings)
 			r.Post("/admin/kilns", s.handleCreateKiln)
 			r.Put("/admin/kilns/{id}", s.handleUpdateKiln)
+			r.Get("/admin/blackouts", s.handleListBlackouts)
+			r.Post("/admin/blackouts", s.handleCreateBlackout)
+			r.Delete("/admin/blackouts/{id}", s.handleDeleteBlackout)
 
 			r.Get("/firings", s.handleListFirings)
 			r.Post("/firings", s.handleCreateFiring)

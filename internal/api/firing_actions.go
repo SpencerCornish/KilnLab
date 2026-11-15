@@ -422,6 +422,9 @@ func (s *Server) reschedule(ctx context.Context, q *db.Queries, f db.Firing, u *
 	if !firing.DayEnd(day, loc).After(s.now()) {
 		return badRequest("that day has already passed")
 	}
+	if err := s.requireAvailable(ctx, q, f.KilnID, day); err != nil {
+		return err
+	}
 	st, err := q.GetSettings(ctx)
 	if err != nil {
 		return err

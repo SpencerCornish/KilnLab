@@ -542,6 +542,16 @@ type Kiln struct {
 	UpdatedAt        time.Time `json:"updated_at"`
 }
 
+type KilnBlackout struct {
+	ID        int64     `json:"id"`
+	KilnID    int64     `json:"kiln_id"`
+	StartDate time.Time `json:"start_date"`
+	EndDate   time.Time `json:"end_date"`
+	Reason    string    `json:"reason"`
+	CreatedBy *int64    `json:"created_by"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type NotificationMessage struct {
 	ID               int64        `json:"id"`
 	FiringID         int64        `json:"firing_id"`
