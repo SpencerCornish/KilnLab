@@ -137,6 +137,12 @@ function SettingsForm({ data, onSaved }: { data: AdminSettings; onSaved: (d: Adm
         <p className="kc-caption kc-caption--body">
           Reminders go out once a firing is this late being marked started, or this long past its estimated unload.
         </p>
+        <Field
+          label="Day-of reminder (hour)"
+          hint={<span className="kc-caption kc-caption--body block">Kiln masters are reminded at this hour, studio time, on the day of each firing.</span>}
+        >
+          <input type="number" min={0} max={23} className={smallInputClass} value={s.day_reminder_hour} onChange={num('day_reminder_hour')} />
+        </Field>
       </Group>
 
       <Group title="Firing options">

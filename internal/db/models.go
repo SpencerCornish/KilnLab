@@ -495,6 +495,7 @@ type Firing struct {
 	UpdatedAt                  time.Time    `json:"updated_at"`
 	RequestsCloseHandledAt     *time.Time   `json:"requests_close_handled_at"`
 	ScheduledDate              time.Time    `json:"scheduled_date"`
+	DayReminderSentAt          *time.Time   `json:"day_reminder_sent_at"`
 }
 
 type FiringEvent struct {
@@ -595,6 +596,7 @@ type Setting struct {
 	MissedUnloadGraceMinutes int32           `json:"missed_unload_grace_minutes"`
 	PublicPageDaysAhead      int32           `json:"public_page_days_ahead"`
 	UpdatedAt                time.Time       `json:"updated_at"`
+	DayReminderHour          int32           `json:"day_reminder_hour"`
 }
 
 type User struct {

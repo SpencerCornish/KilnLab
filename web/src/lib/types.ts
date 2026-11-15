@@ -294,6 +294,7 @@ export interface Settings {
   slack_channel_id: string
   missed_start_grace_minutes: number
   missed_unload_grace_minutes: number
+  day_reminder_hour: number
   public_page_days_ahead: number
 }
 

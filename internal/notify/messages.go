@@ -85,6 +85,11 @@ func AlertNeedsConfirmation(f db.Firing, loc *time.Location, pct int, url string
 		Describe(f, loc), pct, url)
 }
 
+// AlertMorning is the day-of reminder: the firing is on today.
+func AlertMorning(f db.Firing, loc *time.Location, url string) string {
+	return fmt.Sprintf("🌅 %s is today.\n%s", Describe(f, loc), url)
+}
+
 func AlertMissedStart(f db.Firing, loc *time.Location, url string) string {
 	return fmt.Sprintf("⏰ %s hasn't been marked started yet.\n%s", Describe(f, loc), url)
 }

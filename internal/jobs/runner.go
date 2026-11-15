@@ -136,12 +136,14 @@ func (r *Runner) process(ctx context.Context, id int64, now time.Time) (bool, er
 			return err
 		}
 		full := firing.ComputeFullness(f.ProposerSharePct, approved, f.FullnessOverridePct)
+		loc := studioLoc(st.Timezone)
 		due := Due(Snapshot{
-			Status: f.Status, CreatedAt: f.CreatedAt, DayEnd: firing.DayEnd(f.ScheduledDate, studioLoc(st.Timezone)),
+			Status: f.Status, CreatedAt: f.CreatedAt, DayEnd: firing.DayEnd(f.ScheduledDate, loc),
+			DayReminderAt:   firing.DayStart(f.ScheduledDate, loc).Add(time.Duration(st.DayReminderHour) * time.Hour),
 			RequestsCloseAt: f.RequestsCloseAt, ClosedManually: f.RequestsClosedManually,
 			EstimatedUnloadAt: f.EstimatedUnloadAt, FullnessPct: full.Display,
 			CloseHandledAt: f.RequestsCloseHandledAt, MissedStartSentAt: f.MissedStartReminderSentAt,
-			MissedUnloadSentAt: f.MissedUnloadReminderSentAt,
+			MissedUnloadSentAt: f.MissedUnloadReminderSentAt, DayReminderSentAt: f.DayReminderSentAt,
 		}, rulesFrom(st), now)
 		if !due.Any() {
 			return nil
@@ -207,12 +209,20 @@ func (r *Runner) apply(ctx context.Context, q *db.Queries, f db.Firing, st db.Se
 			return err
 		}
 	}
+	if due.DayReminder {
+		marks.DayReminderSentAt = &now
+		batch.DM(kms, notify.AlertMorning(f, loc, url))
+		if err := event(firing.EventAlertSent, "Kiln masters reminded: firing is today"); err != nil {
+			return err
+		}
+	}
 
 	if _, err := q.MarkJobsDone(ctx, marks); err != nil {
 		return err
 	}
 	r.log.Info("jobs ran", "firing", f.ID, "close", due.CloseRequests, "underfilled", due.Underfilled,
-		"needs_confirmation", due.NeedsConfirmation, "missed_start", due.MissedStart, "missed_unload", due.MissedUnload)
+		"needs_confirmation", due.NeedsConfirmation, "missed_start", due.MissedStart, "missed_unload", due.MissedUnload,
+		"day_reminder", due.DayReminder)
 	return notify.Enqueue(ctx, q, r.notifyCfg, f.ID, 0, &batch)
 }
 
