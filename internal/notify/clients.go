@@ -281,10 +281,12 @@ func slackBlocks(c Card) []any {
 }
 
 // slackAttachments wraps the card's blocks in a legacy attachment, the only
-// place Slack renders a colour: it becomes the message's accent bar. The blocks
-// stay at the top level of normal messages; the wire format is unchanged.
+// place Slack renders a colour: it becomes the message's accent bar. Card
+// messages carry no top-level text or blocks: without top-level blocks Slack
+// would render `text` as a visible body above the attachment, duplicating the
+// card. The plain-text version rides in `fallback` (notifications, previews).
 func slackAttachments(c Card) []any {
-	att := map[string]any{"blocks": slackBlocks(c)}
+	att := map[string]any{"blocks": slackBlocks(c), "fallback": mrkdwnEscape(c.Text())}
 	if c.Color != 0 {
 		att["color"] = fmt.Sprintf("#%06x", c.Color)
 	}
@@ -294,8 +296,7 @@ func slackAttachments(c Card) []any {
 // PostCard creates the main message and returns (channel id, ts).
 func (s *Slack) PostCard(ctx context.Context, channel string, c Card) (string, string, error) {
 	out, err := s.call(ctx, "chat.postMessage", map[string]any{
-		"channel": channel, "text": mrkdwnEscape(c.Text()),
-		"attachments": slackAttachments(c), "unfurl_links": false,
+		"channel": channel, "attachments": slackAttachments(c), "unfurl_links": false,
 	})
 	if err != nil {
 		return "", "", err
@@ -306,7 +307,7 @@ func (s *Slack) PostCard(ctx context.Context, channel string, c Card) (string, s
 // UpdateCard edits the main message in place.
 func (s *Slack) UpdateCard(ctx context.Context, channel, ts string, c Card) error {
 	_, err := s.call(ctx, "chat.update", map[string]any{
-		"channel": channel, "ts": ts, "text": mrkdwnEscape(c.Text()), "attachments": slackAttachments(c),
+		"channel": channel, "ts": ts, "attachments": slackAttachments(c),
 	})
 	return err
 }

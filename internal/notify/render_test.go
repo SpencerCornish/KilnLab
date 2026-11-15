@@ -128,6 +128,9 @@ func TestSlackCardColor(t *testing.T) {
 	if blocks, ok := att["blocks"].([]any); !ok || len(blocks) != 2 {
 		t.Errorf("attachment blocks = %v", att["blocks"])
 	}
+	if att["fallback"] != "Cone 6 Glaze\nStatus: Confirmed\nhttps://k/f/1" {
+		t.Errorf("attachment fallback = %q", att["fallback"])
+	}
 	// A card with no colour (never sent today) must not paint a black bar.
 	if _, ok := slackAttachments(Card{Title: "x"})[0].(map[string]any)["color"]; ok {
 		t.Error("uncoloured card should have no attachment color")
