@@ -121,15 +121,26 @@ type discordMessage struct {
 
 func noMentions() map[string][]any { return map[string][]any{"parse": {}} }
 
+// discordEscape stops member-written text (titles, reasons, names) from
+// rendering as a masked link like [Sign in again](https://evil.example).
+// Bare URLs still show as themselves, which is honest.
+func discordEscape(s string) string {
+	return strings.NewReplacer(`\`, `\\`, "[", `\[`, "]", `\]`).Replace(s)
+}
+
 func discordCardMessage(c Card) discordMessage {
-	title := c.Title
+	title := discordEscape(c.Title)
 	if c.Cancelled {
 		title = "~~" + title + "~~"
+	}
+	lines := make([]string, len(c.Lines))
+	for i, l := range c.Lines {
+		lines[i] = discordEscape(l)
 	}
 	return discordMessage{
 		Embeds: []discordEmbed{{
 			Title: truncate(title, 256), URL: c.URL, Color: c.Color,
-			Description: truncate(strings.Join(c.Lines, "\n")+"\n\n[View / request space →]("+c.URL+")", 4096),
+			Description: truncate(strings.Join(lines, "\n")+"\n\n[View / request space →]("+c.URL+")", 4096),
 		}},
 		AllowedMentions: noMentions(),
 	}
@@ -159,10 +170,11 @@ func (d *Discord) StartThread(ctx context.Context, channel, messageID, name stri
 	return out.ID, err
 }
 
-// PostText sends a plain message (thread replies, DMs).
+// PostText sends a plain message (thread replies, DMs). The text includes
+// member-written parts, so it is escaped.
 func (d *Discord) PostText(ctx context.Context, channel, text string) error {
 	return d.do(ctx, http.MethodPost, "/channels/"+channel+"/messages",
-		discordMessage{Content: truncate(text, 2000), AllowedMentions: noMentions()}, nil)
+		discordMessage{Content: truncate(discordEscape(text), 2000), AllowedMentions: noMentions()}, nil)
 }
 
 // DM opens a DM channel with the user and sends text. Users who don't share
@@ -271,7 +283,7 @@ func slackBlocks(c Card) []any {
 // PostCard creates the main message and returns (channel id, ts).
 func (s *Slack) PostCard(ctx context.Context, channel string, c Card) (string, string, error) {
 	out, err := s.call(ctx, "chat.postMessage", map[string]any{
-		"channel": channel, "text": c.Text(), "blocks": slackBlocks(c), "unfurl_links": false,
+		"channel": channel, "text": mrkdwnEscape(c.Text()), "blocks": slackBlocks(c), "unfurl_links": false,
 	})
 	if err != nil {
 		return "", "", err
@@ -281,13 +293,15 @@ func (s *Slack) PostCard(ctx context.Context, channel string, c Card) (string, s
 
 // UpdateCard edits the main message in place.
 func (s *Slack) UpdateCard(ctx context.Context, channel, ts string, c Card) error {
-	_, err := s.call(ctx, "chat.update", map[string]any{"channel": channel, "ts": ts, "text": c.Text(), "blocks": slackBlocks(c)})
+	_, err := s.call(ctx, "chat.update", map[string]any{"channel": channel, "ts": ts, "text": mrkdwnEscape(c.Text()), "blocks": slackBlocks(c)})
 	return err
 }
 
 // PostText sends a plain message; threadTS replies in a thread; channel may be a user id (DM).
+// The text includes member-written parts, so it is escaped: otherwise a title
+// like <https://evil.example|Sign in again> would render as a disguised link.
 func (s *Slack) PostText(ctx context.Context, channel, text, threadTS string) error {
-	body := map[string]any{"channel": channel, "text": truncate(text, 3000), "unfurl_links": false}
+	body := map[string]any{"channel": channel, "text": truncate(mrkdwnEscape(text), 3000), "unfurl_links": false}
 	if threadTS != "" {
 		body["thread_ts"] = threadTS
 	}

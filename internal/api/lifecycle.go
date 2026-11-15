@@ -379,6 +379,30 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleSignOutUser ends all of a user's sessions. They can sign in again if
+// Discord/Slack still lets them; to keep someone out, remove them there.
+func (s *Server) handleSignOutUser(w http.ResponseWriter, r *http.Request) {
+	me := userFromContext(r.Context())
+	if !me.Roles.CanEditSettings() {
+		s.fail(w, r, forbidden("only admins can sign people out"))
+		return
+	}
+	id, err := idParam(r, "id")
+	if err == nil {
+		_, err = s.queries.GetUser(r.Context(), id)
+	}
+	var n int64
+	if err == nil {
+		n, err = s.queries.DeleteUserSessions(r.Context(), id)
+	}
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	s.logger.Info("user signed out by admin", "user", id, "by", me.ID, "sessions", n)
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // ── Notification log (/admin) ───────────────────────────────────────────────
 
 type outboxDTO struct {

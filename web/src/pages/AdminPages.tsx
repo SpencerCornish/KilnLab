@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, Navigate } from 'react-router'
 import { Alert } from '../components/firing'
-import { getNotificationLog, listUsers, updateUser } from '../lib/api'
+import { getNotificationLog, listUsers, signOutUser, updateUser } from '../lib/api'
 import { PageSpinner, useSession } from '../lib/session'
 import { relative } from '../lib/time'
 import type { AdminUser, OutboxItem } from '../lib/types'
@@ -107,6 +107,20 @@ export function AdminUsersPage() {
     }
   }
 
+  async function signOut(u: AdminUser) {
+    if (!window.confirm(`Sign ${u.display_name} out on all their devices?`)) return
+    setBusy(u.id)
+    setErr(null)
+    try {
+      await signOutUser(u.id)
+      if (u.id === me!.id) await refresh()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const q = query.trim().toLowerCase()
   const users = q ? data.filter((u) => u.display_name.toLowerCase().includes(q)) : data
 
@@ -116,7 +130,8 @@ export function AdminUsersPage() {
         ← Admin
       </Link>
       <h1 className="text-2xl font-bold">People</h1>
-      <p className="text-stone-600">Admins can manage studio settings and other admins. Kiln masters come from the Kiln Master role in Discord.</p>
+      <p className="text-stone-600">Admins can manage studio settings and other admins. Kiln masters come from the Kiln Master role in Discord.
+        People who leave the Discord server or Slack workspace are signed out automatically within about an hour.</p>
       <input
         type="search"
         value={query}
@@ -145,6 +160,14 @@ export function AdminUsersPage() {
                 disabled={busy === u.id || u.id === me.id}
                 onChange={(v) => toggle(u, { admin: v })}
               />
+              <button
+                type="button"
+                disabled={busy === u.id}
+                onClick={() => signOut(u)}
+                className="rounded-xl border-2 border-stone-300 bg-white px-4 py-2 font-semibold text-stone-700 disabled:opacity-50"
+              >
+                Sign out
+              </button>
             </div>
           </li>
         ))}

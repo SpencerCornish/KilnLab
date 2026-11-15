@@ -134,6 +134,28 @@ func (s *Slack) Exchange(ctx context.Context, code string) (*Identity, error) {
 	return id, nil
 }
 
+// CanCheckMembers reports whether a bot token is configured.
+func (s *Slack) CanCheckMembers() bool { return s.botToken != "" }
+
+// CheckMember applies the login rules (not deactivated, not a guest unless
+// allowed) to an existing account, using users.info with the bot token.
+func (s *Slack) CheckMember(ctx context.Context, userID string) (Membership, error) {
+	var info slackUsersInfo
+	if _, err := getJSON(ctx, s.apiBase+"/users.info?user="+url.QueryEscape(userID), "Bearer "+s.botToken, &info); err != nil {
+		return Membership{}, fmt.Errorf("slack users.info: %w", err)
+	}
+	if !info.OK {
+		if info.Error == "user_not_found" {
+			return Membership{}, nil
+		}
+		return Membership{}, fmt.Errorf("slack users.info: %s", info.Error)
+	}
+	if info.User.Deleted || (!s.allowGuests && (info.User.IsRestricted || info.User.IsUltraRestricted)) {
+		return Membership{}, nil
+	}
+	return Membership{Member: true}, nil
+}
+
 func firstNonEmpty(vals ...string) string {
 	for _, v := range vals {
 		if v != "" {

@@ -33,6 +33,7 @@ type Server struct {
 	notifier  *notify.Worker // optional; Kick()ed after changes so sends go out promptly
 
 	trustedProxies []netip.Prefix
+	authLimiter    *rateLimiter
 }
 
 func New(cfg *config.Config, pool *pgxpool.Pool, providers map[string]auth.Provider, webFS fs.FS, log *slog.Logger) *Server {
@@ -47,6 +48,7 @@ func New(cfg *config.Config, pool *pgxpool.Pool, providers map[string]auth.Provi
 	return &Server{
 		cfg: cfg, pool: pool, queries: db.New(pool), providers: providers, webFS: webFS,
 		logger: logger, now: time.Now, trustedProxies: trusted, notifyCfg: NotifyConfig(cfg),
+		authLimiter: newRateLimiter(authRateLimit, authRateWindow),
 	}
 }
 
@@ -87,8 +89,10 @@ func (s *Server) Handler() http.Handler {
 
 		// Auth. start/callback are top-level browser navigations, not fetches.
 		r.Get("/auth/providers", s.handleAuthProviders)
-		r.Get("/auth/{provider}/start", s.handleAuthStart)
-		r.Get("/auth/{provider}/callback", s.handleAuthCallback)
+		// Rate limited per client: start writes a row and callback calls the
+		// provider, both without a login.
+		r.With(s.authLimiter.middleware(s)).Get("/auth/{provider}/start", s.handleAuthStart)
+		r.With(s.authLimiter.middleware(s)).Get("/auth/{provider}/callback", s.handleAuthCallback)
 		r.Post("/auth/logout", s.handleLogout)
 		if s.cfg.DevLogin {
 			r.Post("/auth/dev", s.handleDevLogin)
@@ -101,6 +105,7 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/kiln", s.handleKiln)
 			r.Get("/admin/users", s.handleListUsers)
 			r.Patch("/admin/users/{id}", s.handleUpdateUser)
+			r.Post("/admin/users/{id}/sign-out", s.handleSignOutUser)
 			r.Get("/admin/notifications", s.handleListOutbox)
 			r.Get("/admin/settings", s.handleGetSettings)
 			r.Put("/admin/settings", s.handleUpdateSettings)

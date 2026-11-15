@@ -2,8 +2,10 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 
@@ -20,11 +22,14 @@ type Discord struct {
 	cdnBase  string
 	guildID  string
 	kmRoleID string
+	botToken string
 }
 
 type DiscordConfig struct {
 	ClientID, ClientSecret, RedirectURL string
 	GuildID, KilnMasterRoleID           string
+	// BotToken enables CheckMember (re-checking membership between logins).
+	BotToken string
 	// BaseURL overrides https://discord.com (tests).
 	BaseURL string
 }
@@ -50,6 +55,7 @@ func NewDiscord(c DiscordConfig) *Discord {
 		cdnBase:  "https://cdn.discordapp.com",
 		guildID:  c.GuildID,
 		kmRoleID: c.KilnMasterRoleID,
+		botToken: c.BotToken,
 	}
 }
 
@@ -99,6 +105,42 @@ func (d *Discord) Exchange(ctx context.Context, code string) (*Identity, error) 
 		AvatarURL:      d.avatarURL(m),
 		IsKilnMaster:   slices.Contains(m.Roles, d.kmRoleID),
 	}, nil
+}
+
+// CanCheckMembers reports whether a bot token is configured.
+func (d *Discord) CanCheckMembers() bool { return d.botToken != "" }
+
+// Discord JSON error codes that mean "this person isn't in the guild".
+const (
+	discordUnknownMember = 10007
+	discordUnknownUser   = 10013
+)
+
+// CheckMember looks the user up in the ArtLab guild with the bot token. Only
+// Discord saying the member or user is unknown counts as "left". Any other
+// failure (outage, bot removed from the guild, bad token) is an error, so a
+// misconfigured bot never signs everyone out.
+func (d *Discord) CheckMember(ctx context.Context, userID string) (Membership, error) {
+	u := d.apiBase + "/guilds/" + d.guildID + "/members/" + url.PathEscape(userID)
+	status, body, err := getBody(ctx, u, "Bot "+d.botToken)
+	if err != nil {
+		return Membership{}, fmt.Errorf("discord guild member: %w", err)
+	}
+	if status == http.StatusOK {
+		var m discordMember
+		if err := json.Unmarshal(body, &m); err != nil {
+			return Membership{}, fmt.Errorf("discord guild member: decode: %w", err)
+		}
+		return Membership{Member: true, KilnMaster: slices.Contains(m.Roles, d.kmRoleID)}, nil
+	}
+	var apiErr struct {
+		Code int `json:"code"`
+	}
+	_ = json.Unmarshal(body, &apiErr)
+	if status == http.StatusNotFound && (apiErr.Code == discordUnknownMember || apiErr.Code == discordUnknownUser) {
+		return Membership{}, nil
+	}
+	return Membership{}, fmt.Errorf("discord guild member: status %d (code %d)", status, apiErr.Code)
 }
 
 // discordDisplayName prefers the guild nickname, then the global display name, then the username.

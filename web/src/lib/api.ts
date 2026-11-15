@@ -128,6 +128,8 @@ export const listUsers = () => request<AdminUser[]>('/admin/users')
 export const updateUser = (id: number, patch: { admin: boolean }) =>
   request<void>(`/admin/users/${id}`, json('PATCH', patch))
 
+export const signOutUser = (id: number) => request<void>(`/admin/users/${id}/sign-out`, { method: 'POST' })
+
 export const getNotificationLog = () => request<NotificationLog>('/admin/notifications')
 
 // ── Public (no login) ───────────────────────────────────────────────────────

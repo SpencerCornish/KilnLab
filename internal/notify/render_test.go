@@ -124,3 +124,18 @@ func TestSlackEscaping(t *testing.T) {
 		t.Errorf("slack text = %q", text)
 	}
 }
+
+// Member-written text (titles, reasons) must not turn into disguised links.
+func TestPlainTextIsEscaped(t *testing.T) {
+	if got := mrkdwnEscape("❌ <https://evil.example|Sign in again> was cancelled"); got != "❌ &lt;https://evil.example|Sign in again&gt; was cancelled" {
+		t.Errorf("slack = %q", got)
+	}
+	if got := discordEscape(`[Sign in](https://evil.example) a\b`); got != `\[Sign in\](https://evil.example) a\\b` {
+		t.Errorf("discord = %q", got)
+	}
+	m := discordCardMessage(Card{Title: "[x](https://evil.example)", Lines: []string{"on hold — [y](https://evil.example)"}, URL: "https://k/f/1"})
+	if e := m.Embeds[0]; e.Title != `\[x\](https://evil.example)` ||
+		e.Description != `on hold — \[y\](https://evil.example)`+"\n\n[View / request space →](https://k/f/1)" {
+		t.Errorf("discord card = %+v", e)
+	}
+}

@@ -49,6 +49,7 @@ func main() {
 			RedirectURL:      cfg.AppBaseURL + "/api/auth/discord/callback",
 			GuildID:          cfg.ArtLabGuildID,
 			KilnMasterRoleID: cfg.DiscordKilnMasterRoleID,
+			BotToken:         cfg.DiscordBotToken,
 		})
 	}
 	if cfg.SlackEnabled() {
@@ -94,7 +95,23 @@ func main() {
 	go worker.Run(ctx)
 
 	// Scheduled jobs (spec §10): request cutoffs, kiln-master alerts, missed-scan reminders.
-	go jobs.NewRunner(pool, notifyCfg, worker, logger).Run(ctx)
+	runner := jobs.NewRunner(pool, notifyCfg, worker, logger)
+	// Re-check membership between logins where a bot token allows it. Dev
+	// logins use fake provider IDs, so the check is off with DEV_LOGIN.
+	if !cfg.DevLogin {
+		for name, p := range providers {
+			c, ok := p.(interface {
+				auth.MemberChecker
+				CanCheckMembers() bool
+			})
+			if ok && c.CanCheckMembers() {
+				runner.Checkers[db.AuthProvider(name)] = c
+			} else {
+				slog.Warn("no bot token: membership is only checked at login", "provider", name)
+			}
+		}
+	}
+	go runner.Run(ctx)
 
 	httpSrv := &http.Server{
 		Addr:              srv.Addr(),

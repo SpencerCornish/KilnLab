@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/spencercornish/kilnlab/internal/auth"
 	"github.com/spencercornish/kilnlab/internal/db"
 	"github.com/spencercornish/kilnlab/internal/firing"
 	"github.com/spencercornish/kilnlab/internal/notify"
@@ -16,6 +17,11 @@ import (
 
 // Interval is how often the scheduler ticks (spec §10: ~5 minutes).
 const Interval = 5 * time.Minute
+
+// RecheckInterval is how often membership and the kiln master role are
+// re-checked for signed-in users. It bounds how long someone who has left
+// keeps access (sessions themselves last a week).
+const RecheckInterval = time.Hour
 
 // Kicker wakes the outbox worker; *notify.Worker satisfies it.
 type Kicker interface{ Kick() }
@@ -27,13 +33,19 @@ type Runner struct {
 	kicker    Kicker
 	log       *slog.Logger
 	Now       func() time.Time
+
+	// Checkers re-check membership per provider (see RecheckMembers). Empty
+	// means membership is only checked at login.
+	Checkers    map[db.AuthProvider]auth.MemberChecker
+	lastRecheck time.Time
 }
 
 func NewRunner(pool *pgxpool.Pool, cfg notify.Config, kicker Kicker, log *slog.Logger) *Runner {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Runner{pool: pool, notifyCfg: cfg, kicker: kicker, log: log.With("component", "jobs"), Now: time.Now}
+	return &Runner{pool: pool, notifyCfg: cfg, kicker: kicker, log: log.With("component", "jobs"), Now: time.Now,
+		Checkers: map[db.AuthProvider]auth.MemberChecker{}}
 }
 
 // Run ticks until ctx is cancelled, starting with an immediate tick.
@@ -43,6 +55,12 @@ func (r *Runner) Run(ctx context.Context) {
 	for {
 		if _, err := r.Tick(ctx); err != nil && ctx.Err() == nil {
 			r.log.Error("jobs tick failed", "error", err)
+		}
+		if now := r.Now(); len(r.Checkers) > 0 && now.Sub(r.lastRecheck) >= RecheckInterval && ctx.Err() == nil {
+			r.lastRecheck = now
+			if err := r.RecheckMembers(ctx); err != nil && ctx.Err() == nil {
+				r.log.Error("membership re-check failed", "error", err)
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -56,6 +74,7 @@ func (r *Runner) Run(ctx context.Context) {
 // One firing failing doesn't stop the others.
 func (r *Runner) Tick(ctx context.Context) (int, error) {
 	now := r.Now()
+	r.cleanup(ctx)
 	// Today is a superset cut-off for the candidate query: the studio's date is
 	// never later than the UTC date plus one day. Due makes the exact call.
 	ids, err := db.New(r.pool).ListJobCandidates(ctx, db.ListJobCandidatesParams{
@@ -195,4 +214,63 @@ func (r *Runner) apply(ctx context.Context, q *db.Queries, f db.Firing, st db.Se
 	r.log.Info("jobs ran", "firing", f.ID, "close", due.CloseRequests, "underfilled", due.Underfilled,
 		"needs_confirmation", due.NeedsConfirmation, "missed_start", due.MissedStart, "missed_unload", due.MissedUnload)
 	return notify.Enqueue(ctx, q, r.notifyCfg, f.ID, 0, &batch)
+}
+
+// cleanup deletes expired sessions and OAuth states. Starting a sign-in needs
+// no login, so without this oauth_states would grow without bound.
+func (r *Runner) cleanup(ctx context.Context) {
+	q := db.New(r.pool)
+	if err := q.DeleteExpiredSessions(ctx); err != nil {
+		r.log.Error("deleting expired sessions failed", "error", err)
+	}
+	if err := q.DeleteExpiredOAuthStates(ctx); err != nil {
+		r.log.Error("deleting expired oauth states failed", "error", err)
+	}
+}
+
+// RecheckMembers asks each provider about every account that has a live
+// session or the kiln master flag. People who have left are signed out and
+// lose the flag; a changed Kiln Master role is applied. When a provider can't
+// answer (outage, missing permission) nothing changes for that account.
+func (r *Runner) RecheckMembers(ctx context.Context) error {
+	q := db.New(r.pool)
+	accounts, err := q.ListAccountsToRecheck(ctx)
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, a := range accounts {
+		c := r.Checkers[a.Provider]
+		if c == nil {
+			continue
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		m, err := c.CheckMember(ctx, a.ProviderUserID)
+		if err != nil {
+			r.log.Warn("membership check failed; leaving access unchanged", "account", a.ID, "provider", a.Provider, "error", err)
+			errs = append(errs, err)
+			continue
+		}
+		km := m.Member && m.KilnMaster
+		if km != a.IsKilnMaster {
+			if err := q.SetAccountKilnMaster(ctx, db.SetAccountKilnMasterParams{ID: a.ID, IsKilnMaster: km}); err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			r.log.Info("kiln master role changed", "user", a.UserID, "provider", a.Provider, "kiln_master", km)
+		}
+		if !m.Member {
+			n, err := q.DeleteUserSessions(ctx, a.UserID)
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			if n > 0 {
+				r.log.Info("signed out: no longer a member", "user", a.UserID, "provider", a.Provider, "sessions", n)
+			}
+		}
+	}
+	return errors.Join(errs...)
 }

@@ -171,6 +171,19 @@ func (q *Queries) DeleteSession(ctx context.Context, id string) error {
 	return err
 }
 
+const deleteUserSessions = `-- name: DeleteUserSessions :execrows
+DELETE FROM sessions WHERE user_id = $1
+`
+
+// Signs a user out everywhere (admin action, or membership lost).
+func (q *Queries) DeleteUserSessions(ctx context.Context, userID int64) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteUserSessions, userID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getAccountByProvider = `-- name: GetAccountByProvider :one
 SELECT id, user_id, provider, provider_user_id, provider_team_or_guild_id, is_kiln_master, created_at, updated_at FROM accounts
 WHERE provider = $1 AND provider_user_id = $2
@@ -268,6 +281,58 @@ func (q *Queries) GetUserAccounts(ctx context.Context, userID int64) ([]Account,
 		return nil, err
 	}
 	return items, nil
+}
+
+const listAccountsToRecheck = `-- name: ListAccountsToRecheck :many
+SELECT a.id, a.user_id, a.provider, a.provider_user_id, a.provider_team_or_guild_id, a.is_kiln_master, a.created_at, a.updated_at FROM accounts a
+WHERE a.is_kiln_master
+   OR EXISTS (SELECT 1 FROM sessions s WHERE s.user_id = a.user_id AND s.expires_at > now())
+ORDER BY a.id
+`
+
+// Accounts whose membership still matters: anyone with a live session, plus
+// kiln masters (they get alerts even when signed out).
+func (q *Queries) ListAccountsToRecheck(ctx context.Context) ([]Account, error) {
+	rows, err := q.db.Query(ctx, listAccountsToRecheck)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Account
+	for rows.Next() {
+		var i Account
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Provider,
+			&i.ProviderUserID,
+			&i.ProviderTeamOrGuildID,
+			&i.IsKilnMaster,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const setAccountKilnMaster = `-- name: SetAccountKilnMaster :exec
+UPDATE accounts SET is_kiln_master = $2, updated_at = now() WHERE id = $1
+`
+
+type SetAccountKilnMasterParams struct {
+	ID           int64 `json:"id"`
+	IsKilnMaster bool  `json:"is_kiln_master"`
+}
+
+func (q *Queries) SetAccountKilnMaster(ctx context.Context, arg SetAccountKilnMasterParams) error {
+	_, err := q.db.Exec(ctx, setAccountKilnMaster, arg.ID, arg.IsKilnMaster)
+	return err
 }
 
 const updateAccountOnLogin = `-- name: UpdateAccountOnLogin :exec

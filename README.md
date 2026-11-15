@@ -8,10 +8,10 @@ mostly from a phone after scanning a QR code on the studio wall. Product spec: [
 
 The structure follows BookLab, with current dependency versions.
 
-- **Backend:** Go 1.26 (`cmd/server`, `cmd/seed`, plus `internal/{api,auth,config,db,firing,ical,jobs,notify,policy,webembed}`), chi router
+- **Backend:** Go 1.27 (`cmd/server`, `cmd/seed`, plus `internal/{api,auth,config,db,firing,ical,jobs,notify,policy,webembed}`), chi router
 - **Database:** PostgreSQL 18 via pgx. Migrations are embedded and run on startup (golang-migrate). Queries are generated with **sqlc** from `internal/db/queries/*.sql`.
 - **Frontend:** React 19 + TypeScript 7 SPA (Vite 8, Tailwind 4, react-router 8), embedded into the Go binary
-- **Auth:** Discord OAuth2 (ArtLab guild membership + Kiln Master role) and Sign in with Slack (OIDC, BMS workspace check), using `golang.org/x/oauth2`. Sessions are stored in the DB behind a cookie, with double-submit CSRF.
+- **Auth:** Discord OAuth2 (ArtLab guild membership + Kiln Master role) and Sign in with Slack (OIDC, BMS workspace check), using `golang.org/x/oauth2`. Sessions are stored in the DB behind a cookie, with double-submit CSRF. With the bot tokens set, membership and the Kiln Master role are re-checked every hour, and people who have left are signed out.
 - **Deploy:** one Docker image plus Postgres (`docker-compose.prod.yml`) behind a TLS reverse proxy
 
 ### Deviations from the spec's default stack (§3)

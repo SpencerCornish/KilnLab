@@ -215,3 +215,66 @@ func TestSlackExchange(t *testing.T) {
 		})
 	}
 }
+
+func TestDiscordCheckMember(t *testing.T) {
+	tests := []struct {
+		name    string
+		status  int
+		body    any
+		want    Membership
+		wantErr bool
+	}{
+		{"member", 200, map[string]any{"roles": []string{"other"}}, Membership{Member: true}, false},
+		{"kiln master", 200, map[string]any{"roles": []string{"role-km"}}, Membership{Member: true, KilnMaster: true}, false},
+		{"left the guild", 404, map[string]any{"code": 10007}, Membership{}, false},
+		{"deleted account", 404, map[string]any{"code": 10013}, Membership{}, false},
+		// The bot was removed from the guild: not the member's fault, so no verdict.
+		{"unknown guild", 404, map[string]any{"code": 10004}, Membership{}, true},
+		{"missing access", 403, map[string]any{"code": 50001}, Membership{}, true},
+		{"outage", 502, "bad gateway", Membership{}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := fakeProvider(t, "/api/oauth2/token", map[string]http.HandlerFunc{
+				"/api/v10/guilds/guild1/members/42": jsonHandler(t, "Bot bot-token", tt.status, tt.body),
+			})
+			d := NewDiscord(DiscordConfig{GuildID: "guild1", KilnMasterRoleID: "role-km", BotToken: "bot-token", BaseURL: srv.URL})
+			got, err := d.CheckMember(context.Background(), "42")
+			if (err != nil) != tt.wantErr || got != tt.want {
+				t.Fatalf("CheckMember = %+v, %v; want %+v, error %v", got, err, tt.want, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestSlackCheckMember(t *testing.T) {
+	user := func(fields map[string]any) map[string]any { return map[string]any{"ok": true, "user": fields} }
+	tests := []struct {
+		name        string
+		status      int
+		body        any
+		allowGuests bool
+		want        Membership
+		wantErr     bool
+	}{
+		{"member", 200, user(map[string]any{}), false, Membership{Member: true}, false},
+		{"deactivated", 200, user(map[string]any{"deleted": true}), false, Membership{}, false},
+		{"guest", 200, user(map[string]any{"is_restricted": true}), false, Membership{}, false},
+		{"guest allowed", 200, user(map[string]any{"is_restricted": true}), true, Membership{Member: true}, false},
+		{"unknown user", 200, map[string]any{"ok": false, "error": "user_not_found"}, false, Membership{}, false},
+		{"bad token", 200, map[string]any{"ok": false, "error": "invalid_auth"}, false, Membership{}, true},
+		{"outage", 503, "unavailable", false, Membership{}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := fakeProvider(t, "/api/openid.connect.token", map[string]http.HandlerFunc{
+				"/api/users.info": jsonHandler(t, "Bearer bot-token", tt.status, tt.body),
+			})
+			s := NewSlack(SlackConfig{TeamID: "T1", BotToken: "bot-token", AllowGuests: tt.allowGuests, BaseURL: srv.URL})
+			got, err := s.CheckMember(context.Background(), "U1")
+			if (err != nil) != tt.wantErr || got != tt.want {
+				t.Fatalf("CheckMember = %+v, %v; want %+v, error %v", got, err, tt.want, tt.wantErr)
+			}
+		})
+	}
+}

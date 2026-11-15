@@ -65,3 +65,18 @@ RETURNING *;
 
 -- name: DeleteExpiredOAuthStates :exec
 DELETE FROM oauth_states WHERE expires_at <= now();
+
+-- name: DeleteUserSessions :execrows
+-- Signs a user out everywhere (admin action, or membership lost).
+DELETE FROM sessions WHERE user_id = $1;
+
+-- name: ListAccountsToRecheck :many
+-- Accounts whose membership still matters: anyone with a live session, plus
+-- kiln masters (they get alerts even when signed out).
+SELECT a.* FROM accounts a
+WHERE a.is_kiln_master
+   OR EXISTS (SELECT 1 FROM sessions s WHERE s.user_id = a.user_id AND s.expires_at > now())
+ORDER BY a.id;
+
+-- name: SetAccountKilnMaster :exec
+UPDATE accounts SET is_kiln_master = $2, updated_at = now() WHERE id = $1;

@@ -8,7 +8,7 @@ COPY web/ ./
 RUN pnpm run build
 
 # Stage 2: build the Go binary with the SPA embedded
-FROM golang:1.26-alpine AS builder
+FROM golang:1.27-alpine AS builder
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download

@@ -128,6 +128,21 @@ reschedule, cancel, close/reopen requests; unit tests for state machine, permiss
 
 ---
 
+## Security review (2026-11-14, after deploying to kiln.bozemanartlab.com)
+
+| Item | Status | Notes |
+|---|:-:|---|
+| Go 1.27.4 (was 1.26.3, 21 reachable stdlib vulnerabilities) | ✅ | `go.mod`, `.tool-versions`, `Dockerfile`. `govulncheck` clean. **Redeploy with `--pull`** |
+| Delete expired sessions / OAuth states; rate limit sign-in | ✅ | D45 |
+| Hourly membership + Kiln Master re-check; admin "Sign out" | ✅ | D43, D44. Needs the bot tokens in production |
+| Escape member text in Slack/Discord DMs and thread replies | ✅ | D46 |
+| CI runs on pushes to `master` | ✅ | Was `main` |
+| Login CSRF when the callback has no binding cookie | ⬜ | Accepted mobile trade-off; a "Continue as …?" step would close it |
+| `__Host-` cookie prefix | ⬜ | Stops sibling subdomains setting our cookies |
+| HTTP read/write/idle timeouts, CAA record, digest-pinned images | ⬜ | Hardening |
+
+---
+
 ## Dev-experience backlog
 
 | Item | Status |

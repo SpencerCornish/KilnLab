@@ -50,6 +50,10 @@ default currently in use. When the owner answers a question, move it to Decision
 | D40 | 2026-11-11 | A change to the request cutoff applies to firings proposed or rescheduled afterwards (`requests_close_at` is stored per firing) | Firings people already planned around don't shift |
 | D41 | 2026-11-11 | Printable QR codes on `/admin/qr`, drawn in the browser with `uqr`, using `APP_BASE_URL`. With more than one active kiln, each kiln QR is `/kiln?k=<id>` | No server QR dependency; warns when the base URL is localhost |
 | D42 | 2026-11-11 | At least one kiln must stay active | New firings need a kiln (`pickKiln`) |
+| D43 | 2026-11-14 | Membership and the Kiln Master role are re-checked hourly with the bot tokens (`jobs.RecheckMembers`) for accounts with a live session or the kiln master flag. Leavers are signed out; a lookup that fails changes nothing. Off with `DEV_LOGIN` or without a bot token | Sessions last 7 days; without this, people who left kept access until expiry (security review) |
+| D44 | 2026-11-14 | Admins can sign a user out everywhere (`POST /api/admin/users/{id}/sign-out`). It doesn't block signing in again; remove the person in Discord/Slack for that | Lost phone, shared device |
+| D45 | 2026-11-14 | Sign-in start/callback are limited to 30 per minute per client IP, in memory. Expired sessions and OAuth states are deleted on each jobs tick | Starting sign-in writes a row without a login |
+| D46 | 2026-11-14 | Plain messages (DMs, thread replies) are escaped at send time: Slack `& < >`, Discord `[ ] \` | Member-written titles and reasons could render as disguised links |
 | D23 | 2026-11-11 | Datetimes are entered and shown in `settings.timezone`, not the phone's timezone. Binary embeds `time/tzdata` | Everyone sees studio wall time |
 
 ---
