@@ -208,56 +208,11 @@ function ConfirmStep({
 
 // ── Recorded times + corrections ────────────────────────────────────────────
 
-const TIME_ROWS: { field: TimestampField; label: string }[] = [
+export const TIME_ROWS: { field: TimestampField; label: string }[] = [
   { field: 'started_at', label: 'Started' },
   { field: 'cooling_at', label: 'Cooling' },
   { field: 'unloaded_at', label: 'Unloaded' },
 ]
-
-/** Lists recorded lifecycle times; kiln masters can correct each one. */
-export function RecordedTimes({
-  detail,
-  tz,
-  onCorrect,
-}: {
-  detail: FiringDetail
-  tz: string
-  onCorrect: (field: TimestampField) => void
-}) {
-  const f = detail.firing
-  const rows = TIME_ROWS.filter((r) => f[r.field])
-  if (rows.length === 0) return null
-  return (
-    <section className="kc-plate">
-      <header className="kc-plate__head">
-        <span className="kc-label">Program &amp; times</span>
-      </header>
-      <div className="kc-plate__body kc-plate__body--tight">
-        {f.program && (
-          <p className="kc-data">
-            Program: {f.program}
-            {f.estimated_duration_minutes && ` · about ${Math.round((f.estimated_duration_minutes / 60) * 10) / 10}h`}
-          </p>
-        )}
-        {f.estimated_unload_at && !f.unloaded_at && (
-          <p className="kc-data">Estimated unload: {formatWhen(f.estimated_unload_at, tz)}</p>
-        )}
-        {rows.map((r) => (
-          <div key={r.field} className="kc-spec-row">
-            <span>
-              <span className="kc-label kc-muted">{r.label}:</span> <span className="kc-data">{formatWhen(f[r.field]!, tz)}</span>
-            </span>
-            {detail.can.correct_timestamps && (
-              <button onClick={() => onCorrect(r.field)} className="kc-key kc-key--sm">
-                Fix
-              </button>
-            )}
-          </div>
-        ))}
-      </div>
-    </section>
-  )
-}
 
 export function CorrectTimeForm({
   detail,

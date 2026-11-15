@@ -588,6 +588,55 @@ func (q *Queries) ListEventsForFiring(ctx context.Context, firingID int64) ([]Li
 	return items, nil
 }
 
+const listFiringParticipants = `-- name: ListFiringParticipants :many
+SELECT f.id AS firing_id,
+       f.proposed_by_user_id AS user_id,
+       u.display_name AS name,
+       f.proposer_share_pct AS share_pct
+FROM firings f
+JOIN users u ON u.id = f.proposed_by_user_id
+WHERE f.id = ANY($1::bigint[])
+UNION ALL
+SELECT r.firing_id, r.user_id, u.display_name, r.estimated_share_pct
+FROM firing_requests r
+JOIN users u ON u.id = r.user_id
+WHERE r.firing_id = ANY($1::bigint[]) AND r.status = 'approved'
+ORDER BY firing_id, share_pct DESC, user_id
+`
+
+type ListFiringParticipantsRow struct {
+	FiringID int64  `json:"firing_id"`
+	UserID   int64  `json:"user_id"`
+	Name     string `json:"name"`
+	SharePct int32  `json:"share_pct"`
+}
+
+// Everyone with work in the listed firings: the proposer plus approved requests.
+func (q *Queries) ListFiringParticipants(ctx context.Context, firingIds []int64) ([]ListFiringParticipantsRow, error) {
+	rows, err := q.db.Query(ctx, listFiringParticipants, firingIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListFiringParticipantsRow
+	for rows.Next() {
+		var i ListFiringParticipantsRow
+		if err := rows.Scan(
+			&i.FiringID,
+			&i.UserID,
+			&i.Name,
+			&i.SharePct,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listFiringSummaries = `-- name: ListFiringSummaries :many
 SELECT f.id, f.kiln_id, f.proposed_by_user_id, f.firing_type, f.cone, f.title, f.notes, f.status, f.was_confirmed, f.hold_reason, f.cancel_reason, f.proposer_description, f.proposer_share_pct, f.proposer_cone, f.proposer_clay_body, f.fullness_override_pct, f.requests_close_at, f.requests_closed_manually, f.program, f.estimated_duration_minutes, f.started_at, f.estimated_unload_at, f.cooling_at, f.unloaded_at, f.ready_for_pickup_at, f.completed_at, f.underfilled_alert_sent_at, f.missed_start_reminder_sent_at, f.missed_unload_reminder_sent_at, f.created_at, f.updated_at, f.requests_close_handled_at, f.scheduled_date,
        u.display_name AS proposer_name,

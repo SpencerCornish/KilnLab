@@ -107,11 +107,7 @@ function ProposeForm({ options }: { options: Options }) {
         label="Day"
         hint={
           <span className="kc-caption kc-caption--body block">
-            Firings are booked for a day. There's no start time to hold to: the kiln runs sometime that day.{' '}
-            {canBypass
-              ? 'As a kiln master you can skip the minimum notice.'
-              : `The day has to start at least ${options.min_notice_hours} hours from now.`}{' '}
-            Requests close {options.request_cutoff_hours}h before the day starts.
+            Booked for a day; the kiln runs sometime that day. Requests close {options.request_cutoff_hours}h before.
           </span>
         }
       >
@@ -125,7 +121,7 @@ function ProposeForm({ options }: { options: Options }) {
         />
       </Field>
 
-      <div className="kc-plate kc-plate--pad space-y-4">
+      <section className="space-y-4">
         <h2 className="kc-title kc-title--sm">Your work</h2>
         <Field label="What are you putting in?">
           <textarea
@@ -142,7 +138,7 @@ function ProposeForm({ options }: { options: Options }) {
         <Field label="Clay body (optional)">
           <input value={clayBody} maxLength={120} onChange={(e) => setClayBody(e.target.value)} className={inputClass} />
         </Field>
-      </div>
+      </section>
 
       <details className="kc-plate kc-plate--pad">
         <summary className="kc-field__label cursor-pointer">More (title, notes)</summary>

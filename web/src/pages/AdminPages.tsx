@@ -9,24 +9,20 @@ import { useLoad } from '../lib/useLoad'
 
 export function AdminIndexPage() {
   const { me } = useSession()
-  if (!me || !(me.roles.kiln_master || me.roles.admin)) return <Navigate to="/" replace />
+  if (!me?.roles.admin) return <Navigate to="/" replace />
   return (
     <div className="space-y-4">
       <h1 className="kc-title">Admin</h1>
-      {me.roles.admin && (
-        <>
-          <Link to="/admin/users" className="kc-key kc-key--block">
-            People
-          </Link>
-          <Link to="/admin/settings" className="kc-key kc-key--block">
-            Studio settings &amp; kilns
-          </Link>
-          <Link to="/admin/qr" className="kc-key kc-key--block">
-            Printable QR codes
-          </Link>
-          <NotificationLogSection />
-        </>
-      )}
+      <Link to="/admin/users" className="kc-key kc-key--block">
+        People
+      </Link>
+      <Link to="/admin/settings" className="kc-key kc-key--block">
+        Studio settings &amp; kilns
+      </Link>
+      <Link to="/admin/qr" className="kc-key kc-key--block">
+        Printable QR codes
+      </Link>
+      <NotificationLogSection />
     </div>
   )
 }

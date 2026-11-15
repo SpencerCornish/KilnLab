@@ -81,8 +81,8 @@ function SettingsForm({ data, onSaved }: { data: AdminSettings; onSaved: (d: Adm
 
   const env = data.env
   return (
-    <form onSubmit={save} className="space-y-8">
-      <Group title="Scheduling">
+    <form onSubmit={save} className="space-y-4">
+      <Group title="Scheduling" open>
         <div className="grid grid-cols-2 items-end gap-3">
           <Field label="Minimum notice (hours)">
             <input type="number" min={0} className={smallInputClass} value={s.min_notice_hours} onChange={num('min_notice_hours')} />
@@ -219,12 +219,12 @@ function SettingsForm({ data, onSaved }: { data: AdminSettings; onSaved: (d: Adm
   )
 }
 
-function Group({ title, children }: { title: string; children: ReactNode }) {
+function Group({ title, open, children }: { title: string; open?: boolean; children: ReactNode }) {
   return (
-    <section className="space-y-3">
-      <h2 className="kc-title kc-title--sm">{title}</h2>
-      {children}
-    </section>
+    <details className="kc-plate kc-plate--pad" open={open}>
+      <summary className="kc-title kc-title--sm cursor-pointer">{title}</summary>
+      <div className="mt-4 space-y-3">{children}</div>
+    </details>
   )
 }
 

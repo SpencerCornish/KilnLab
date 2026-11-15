@@ -11,10 +11,10 @@ export default function Layout() {
           KilnLab
         </Link>
         {me ? (
-          <Link to="/" className="kc-header__user">
+          <div className="kc-header__user">
             {me.avatar_url && <img src={me.avatar_url} alt="" className="kc-avatar size-8" />}
             <span className="kc-header__name">{me.display_name}</span>
-          </Link>
+          </div>
         ) : (
           <Link to="/login" className="kc-key kc-key--sm kc-key--fire">
             Sign in

@@ -26,7 +26,7 @@ import type {
   TimestampField,
 } from '../lib/types'
 import { useLoad } from '../lib/useLoad'
-import { CorrectTimeForm, LifecyclePanel, RecordedTimes } from '../components/lifecycle'
+import { CorrectTimeForm, LifecyclePanel, TIME_ROWS } from '../components/lifecycle'
 
 type SheetKind =
   | { kind: 'request' }
@@ -106,8 +106,18 @@ export default function FiringPage() {
         <p className="kc-data">{formatDate(f.scheduled_date)}</p>
         <p className="kc-caption kc-caption--body">
           <span className="capitalize">{f.firing_type}</span> · Cone {f.cone}
-          {kilnLabel(options, f.kiln_id) && ` · ${kilnLabel(options, f.kiln_id)}`} · proposed by {f.proposer.name}
+          {kilnLabel(options, f.kiln_id) && ` · ${kilnLabel(options, f.kiln_id)}`}
         </p>
+        {f.started_at && (
+          <p className="kc-data kc-muted">
+            Started {formatWhen(f.started_at, tz)}
+            {f.unloaded_at
+              ? ` · unloaded ${formatWhen(f.unloaded_at, tz)}`
+              : f.estimated_unload_at && ` · est. unload ${formatWhen(f.estimated_unload_at, tz)}`}
+          </p>
+        )}
+        {f.status === 'on_hold' && f.hold_reason && <p className="kc-warning">On hold: {f.hold_reason}</p>}
+        {f.status === 'cancelled' && f.cancel_reason && <p className="kc-warning">Cancelled: {f.cancel_reason}</p>}
       </section>
 
       {warnings.length > 0 && (
@@ -120,15 +130,12 @@ export default function FiringPage() {
         </Alert>
       )}
       {!sheet && actionError && <Alert kind="error">{actionError}</Alert>}
-      {f.status === 'on_hold' && f.hold_reason && <Alert kind="warning">On hold: {f.hold_reason}</Alert>}
-      {f.status === 'cancelled' && f.cancel_reason && <Alert kind="error">Cancelled: {f.cancel_reason}</Alert>}
 
       {/* Fullness + requests window */}
       {f.status !== 'cancelled' && (
         <section className="kc-plate">
           <header className="kc-plate__head">
             <span className="kc-label">Capacity</span>
-            {f.fullness.overridden && <span className="kc-tag kc-tag--flag">Set by kiln master</span>}
           </header>
           <div className="kc-plate__body kc-plate__body--tight">
             <FullnessBar fullness={f.fullness} large />
@@ -144,10 +151,10 @@ export default function FiringPage() {
         </section>
       )}
 
-      {/* Lifecycle: next steps (same as the kiln QR page) + recorded times */}
-      {detail.can.next_steps.length > 0 && (
+      {/* Actions: lifecycle next steps (same as the kiln QR page) + kiln-master controls */}
+      {(detail.can.next_steps.length > 0 || kmControls) && (
         <section className="space-y-4">
-          <h2 className="kc-title kc-title--sm">Update status</h2>
+          <h2 className="kc-title kc-title--sm">Actions</h2>
           <LifecyclePanel
             detail={detail}
             options={options}
@@ -157,9 +164,35 @@ export default function FiringPage() {
               setWarnings(res.warnings)
             }}
           />
+          {kmControls && (
+            <div className="kc-keys kc-keys--grid">
+              {can.confirm && (
+                <button disabled={busy} onClick={() => run(() => act.confirm(f.id))} className="kc-key kc-key--go">
+                  Confirm firing
+                </button>
+              )}
+              {can.release && (
+                <button onClick={() => setSheet({ kind: 'release' })} className="kc-key kc-key--go">
+                  Release hold
+                </button>
+              )}
+              {can.reschedule && <KmButton onClick={() => setSheet({ kind: 'reschedule' })}>Reschedule</KmButton>}
+              {can.hold && <KmButton onClick={() => setSheet({ kind: 'hold' })}>Put on hold</KmButton>}
+              {can.manage && <KmButton onClick={() => setSheet({ kind: 'fullness' })}>Set fullness</KmButton>}
+              {can.manage && (
+                <KmButton disabled={busy} onClick={() => run(() => act.setRequestsClosed(f.id, f.requests_open))}>
+                  {f.requests_open ? 'Close requests' : 'Reopen requests'}
+                </KmButton>
+              )}
+              {can.cancel && (
+                <button onClick={() => setSheet({ kind: 'cancel' })} className="kc-key kc-key--block kc-key--danger">
+                  Cancel firing
+                </button>
+              )}
+            </div>
+          )}
         </section>
       )}
-      <RecordedTimes detail={detail} tz={tz} onCorrect={(field) => setSheet({ kind: 'correct', field })} />
 
       {/* My request / request space */}
       {detail.my_request ? (
@@ -199,39 +232,8 @@ export default function FiringPage() {
         ))}
       </section>
 
-      {/* Kiln master controls */}
-      {kmControls && (
-        <section className="space-y-4">
-          <h2 className="kc-title kc-title--sm">Kiln master</h2>
-          <div className="kc-keys kc-keys--grid">
-            {can.confirm && (
-              <button disabled={busy} onClick={() => run(() => act.confirm(f.id))} className="kc-key kc-key--block kc-key--go">
-                Confirm firing
-              </button>
-            )}
-            {can.release && (
-              <button onClick={() => setSheet({ kind: 'release' })} className="kc-key kc-key--block kc-key--go">
-                Release hold
-              </button>
-            )}
-            {can.reschedule && <KmButton onClick={() => setSheet({ kind: 'reschedule' })}>Reschedule</KmButton>}
-            {can.hold && <KmButton onClick={() => setSheet({ kind: 'hold' })}>Put on hold</KmButton>}
-            {can.manage && <KmButton onClick={() => setSheet({ kind: 'fullness' })}>Set fullness</KmButton>}
-            {can.manage && (
-              <KmButton disabled={busy} onClick={() => run(() => act.setRequestsClosed(f.id, f.requests_open))}>
-                {f.requests_open ? 'Close requests' : 'Reopen requests'}
-              </KmButton>
-            )}
-            {can.cancel && (
-              <button onClick={() => setSheet({ kind: 'cancel' })} className="kc-key kc-key--danger flex-1">
-                Cancel firing
-              </button>
-            )}
-          </div>
-        </section>
-      )}
-
-      <Timeline events={detail.events} tz={tz} />
+      {/* History: program, recorded times and the event log, tucked away */}
+      <History detail={detail} tz={tz} onCorrect={(field) => setSheet({ kind: 'correct', field })} />
 
       <ActionSheets
         sheet={sheet}
@@ -701,28 +703,57 @@ function describe(e: FiringEvent): string {
   }
 }
 
-function Timeline({ events, tz }: { events: FiringEvent[]; tz: string }) {
-  if (events.length === 0) return null
+/** Collapsed audit trail: program, recorded times (fixable by kiln masters), and events. */
+function History({ detail, tz, onCorrect }: { detail: FiringDetail; tz: string; onCorrect: (field: TimestampField) => void }) {
+  const f = detail.firing
+  const rows = TIME_ROWS.filter((r) => f[r.field])
+  if (detail.events.length === 0 && !f.program && rows.length === 0) return null
   return (
-    <section className="space-y-4">
-      <h2 className="kc-title kc-title--sm">Timeline</h2>
-      <ol className="kc-log kc-log--stack">
-        {[...events].reverse().map((e) => {
-          const what = describe(e)
-          return (
-            <li key={e.id}>
-              <span className="kc-log__time">
-                {formatWhen(e.occurred_at, tz)}
-                {e.actor && ` · ${e.actor.name}`}
-                {e.source === 'kiln_qr' && ' · kiln QR'}
-                {e.source === 'system' && ' · automatic'}
-              </span>
-              {what && <p className="kc-label">{what}</p>}
-              {e.note && <p className={what ? 'kc-caption kc-caption--body' : 'kc-label'}>{e.note}</p>}
-            </li>
-          )
-        })}
-      </ol>
-    </section>
+    <details>
+      <summary className="kc-title kc-title--sm cursor-pointer">History</summary>
+      <div className="mt-4 space-y-4">
+        {f.program && (
+          <p className="kc-data">
+            Program: {f.program}
+            {f.estimated_duration_minutes && ` · about ${Math.round((f.estimated_duration_minutes / 60) * 10) / 10}h`}
+          </p>
+        )}
+        {rows.length > 0 && (
+          <div>
+            {rows.map((r) => (
+              <div key={r.field} className="kc-spec-row">
+                <span>
+                  <span className="kc-label kc-muted">{r.label}:</span> <span className="kc-data">{formatWhen(f[r.field]!, tz)}</span>
+                </span>
+                {detail.can.correct_timestamps && (
+                  <button onClick={() => onCorrect(r.field)} className="kc-key kc-key--sm">
+                    Fix
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        {detail.events.length > 0 && (
+          <ol className="kc-log kc-log--stack">
+            {[...detail.events].reverse().map((e) => {
+              const what = describe(e)
+              return (
+                <li key={e.id}>
+                  <span className="kc-log__time">
+                    {formatWhen(e.occurred_at, tz)}
+                    {e.actor && ` · ${e.actor.name}`}
+                    {e.source === 'kiln_qr' && ' · kiln QR'}
+                    {e.source === 'system' && ' · automatic'}
+                  </span>
+                  {what && <p className="kc-label">{what}</p>}
+                  {e.note && <p className={what ? 'kc-caption kc-caption--body' : 'kc-label'}>{e.note}</p>}
+                </li>
+              )
+            })}
+          </ol>
+        )}
+      </div>
+    </details>
   )
 }

@@ -1,7 +1,7 @@
 import { useEffect, useRef, type CSSProperties, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { dayParts } from '../lib/time'
-import type { Firing, FiringStatus, FiringSummary, Fullness, Kiln, Options } from '../lib/types'
+import type { Firing, FiringStatus, FiringSummary, Fullness, Kiln, Options, Participant } from '../lib/types'
 
 /** The kiln's name, but only when there's more than one kiln (otherwise it's noise). */
 export function kilnLabel(options: Options, kilnId: number): string | null {
@@ -40,7 +40,16 @@ export function StatusBadge({ status, label }: { status: FiringStatus; label?: s
 
 // ── Fullness ────────────────────────────────────────────────────────────────
 
-export function FullnessBar({ fullness, large }: { fullness: Fullness; large?: boolean }) {
+export function FullnessBar({
+  fullness,
+  large,
+  caption = 'full',
+}: {
+  fullness: Fullness
+  large?: boolean
+  /** What the line under the meter says; `none` leaves it to the caller. */
+  caption?: 'full' | 'room' | 'none'
+}) {
   const pct = fullness.display_pct
   return (
     <div>
@@ -57,13 +66,32 @@ export function FullnessBar({ fullness, large }: { fullness: Fullness; large?: b
           <span className="kc-meter__bar" />
         </span>
       </span>
-      <div className="kc-meter-caption">
-        <span>
-          {pct}% full{fullness.overridden && <span className="kc-muted"> (set by kiln master)</span>}
-        </span>
-        <span>{fullness.room_left_pct}% room left</span>
-      </div>
+      {caption !== 'none' && (
+        <div className="kc-meter-caption">
+          {caption === 'full' ? (
+            <span>
+              {pct}% full{fullness.overridden && <span className="kc-muted"> (set by kiln master)</span>}
+            </span>
+          ) : (
+            <span>{fullness.room_left_pct}% room left</span>
+          )}
+        </div>
+      )}
     </div>
+  )
+}
+
+/** Who's in, under a firing's meter: each name with the share it takes up. */
+export function Participants({ people }: { people: Participant[] }) {
+  if (people.length === 0) return null
+  return (
+    <ul className="kc-people">
+      {people.map((p) => (
+        <li key={p.id}>
+          {p.name} <span className="kc-people__share">{p.share_pct}%</span>
+        </li>
+      ))}
+    </ul>
   )
 }
 
@@ -87,7 +115,7 @@ export function FiringCard({ firing, options }: { firing: FiringSummary; options
   const d = dayParts(firing.scheduled_date)
   const kiln = kilnLabel(options, firing.kiln_id)
   return (
-    <Link to={`/firings/${firing.id}`} className="kc-plate kc-plate--link">
+    <Link to={`/firings/${firing.id}`} className={`kc-plate kc-plate--link${firing.is_mine ? ' kc-plate--mine' : ''}`}>
       <div className="kc-plate__head">
         <span className="kc-label kc-label--date">
           {d.weekday} {d.month} {d.day}
@@ -101,10 +129,13 @@ export function FiringCard({ firing, options }: { firing: FiringSummary; options
             <span className="kc-tag kc-tag--flag ml-2 align-middle">{firing.pending_count} pending</span>
           )}
         </h3>
-        <p className="kc-caption kc-caption--body">
-          {kiln && `${kiln} · `}by {firing.proposer.name}
-        </p>
-        {firing.status !== 'cancelled' && <FullnessBar fullness={firing.fullness} />}
+        {kiln && <p className="kc-caption kc-caption--body">{kiln}</p>}
+        {firing.status !== 'cancelled' && (
+          <>
+            <FullnessBar fullness={firing.fullness} caption="none" />
+            <Participants people={firing.participants} />
+          </>
+        )}
       </div>
     </Link>
   )
@@ -125,7 +156,7 @@ export function Field({ label, hint, children }: { label: string; hint?: ReactNo
   )
 }
 
-/** Big tappable share picker: a slider plus quick buttons. */
+/** Big tappable share picker: quick presets, glove-friendly. */
 export function ShareInput({ value, onChange, kiln }: { value: number; onChange: (v: number) => void; kiln: Kiln | undefined }) {
   const presets = [10, 25, 50, 75, 100]
   return (
@@ -134,15 +165,6 @@ export function ShareInput({ value, onChange, kiln }: { value: number; onChange:
         <span className="kc-field__label kc-field__label--flush">How much of the kiln?</span>
         <span className="kc-value">{value}%</span>
       </div>
-      <input
-        type="range"
-        min={1}
-        max={100}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="kc-range"
-        aria-label="Share of the kiln in percent"
-      />
       <div className="grid grid-cols-5 gap-2">
         {presets.map((p) => (
           <button

@@ -33,6 +33,22 @@ JOIN users u ON u.id = f.proposed_by_user_id
 WHERE f.status NOT IN ('completed', 'cancelled') OR f.scheduled_date >= sqlc.arg(since)
 ORDER BY f.scheduled_date, f.id;
 
+-- name: ListFiringParticipants :many
+-- Everyone with work in the listed firings: the proposer plus approved requests.
+SELECT f.id AS firing_id,
+       f.proposed_by_user_id AS user_id,
+       u.display_name AS name,
+       f.proposer_share_pct AS share_pct
+FROM firings f
+JOIN users u ON u.id = f.proposed_by_user_id
+WHERE f.id = ANY(sqlc.arg(firing_ids)::bigint[])
+UNION ALL
+SELECT r.firing_id, r.user_id, u.display_name, r.estimated_share_pct
+FROM firing_requests r
+JOIN users u ON u.id = r.user_id
+WHERE r.firing_id = ANY(sqlc.arg(firing_ids)::bigint[]) AND r.status = 'approved'
+ORDER BY firing_id, share_pct DESC, user_id;
+
 -- name: SetFiringStatus :one
 UPDATE firings
 SET status = sqlc.arg(status),

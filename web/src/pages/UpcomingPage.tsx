@@ -35,11 +35,6 @@ export default function UpcomingPage() {
         <Link to="/firings/new" className="kc-key kc-key--block kc-key--fire">
           + Propose a firing
         </Link>
-        {me && (
-          <Link to="/" className="kc-key kc-key--block">
-            My firings
-          </Link>
-        )}
       </div>
 
       {error && <Alert kind="error">Couldn't load firings: {error}</Alert>}
@@ -90,6 +85,7 @@ function PublicFiringCard({ firing: f, tz }: { firing: PublicFiring; tz: string 
         ) : (
           <>
             <FullnessBar
+              caption="room"
               fullness={{ display_pct: f.fullness_pct, room_left_pct: f.room_left_pct, calculated_pct: f.fullness_pct, overridden: false }}
             />
             <p className="kc-caption kc-caption--body">
@@ -139,7 +135,6 @@ function CalendarLink() {
             {copied ? 'Copied!' : 'Copy link'}
           </button>
         </div>
-        <p className="kc-data break-all">{url}</p>
       </div>
     </section>
   )

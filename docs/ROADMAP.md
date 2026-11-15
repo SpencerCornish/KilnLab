@@ -14,6 +14,9 @@ _Post-M4 owner testing changes: unloaded, ready for pickup and completed merged 
 
 _2026-11-14 UI refresh: the **Kiln Control** design system is applied across the SPA (D47): plain `kc-*` classes + tokens in `web/src/styles/`, self-hosted fonts, 56px tap targets, and segmented capacity meters. Layouts checked at 320px and 390px wide; still worth a pass on a real phone._
 
+_2026-11-14 UI declutter (branch `ui-clutter`, not yet merged): firing page consolidated (one Actions section; program/times + timeline folded into a collapsed History; hold/cancel reasons as header captions), home button bank trimmed to Propose + Admin, "Recently finished" capped at 3, ShareInput is presets-only (no slider), fullness meters show one number (room-left on the public page), plate heads flattened, admin index gated to admins (was an empty page for kiln masters), settings groups collapsed into disclosures. Home is one soonest-first list (no "mine" vs "upcoming" split; firings you're in get a highlighted plate), "Recently finished" is a collapsed disclosure, and firing cards list who's in under the meter, each with its share (`ListFiringParticipants`). Cards no longer print "by &lt;proposer&gt;"; the name list carries it._
+
+
 ---
 
 ## Milestone summary

@@ -280,12 +280,21 @@ func TestFiringsAndRequestsFlow(t *testing.T) {
 		}
 	}
 
-	// The list endpoint flags firings I'm in.
+	// The list endpoint flags firings I'm in, with who's in each and what they use.
 	list := bob.mustDo("GET", "/api/firings", nil, http.StatusOK)["items"].([]any)
 	mine := 0
 	for _, f := range list {
-		if f.(map[string]any)["is_mine"] == true {
-			mine++
+		if f.(map[string]any)["is_mine"] != true {
+			continue
+		}
+		mine++
+		people := f.(map[string]any)["participants"].([]any)
+		if len(people) != 2 { // Alice proposed 30%, Bob's approved request is 40%
+			t.Fatalf("participants = %v", people)
+		}
+		first, second := people[0].(map[string]any), people[1].(map[string]any)
+		if first["name"] != "Bob" || first["share_pct"] != 40.0 || second["name"] != "Alice" || second["share_pct"] != 30.0 {
+			t.Fatalf("participants not biggest-share-first: %v", people)
 		}
 	}
 	if len(list) != 2 || mine != 1 {

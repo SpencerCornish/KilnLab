@@ -117,6 +117,23 @@ func TestBackoff(t *testing.T) {
 	}
 }
 
+// Slack only carries colour on legacy attachments, so the card's blocks ride
+// inside one whose `color` is the status colour Discord already gets.
+func TestSlackCardColor(t *testing.T) {
+	c := Card{Title: "Cone 6 Glaze", Lines: []string{"Status: Confirmed"}, URL: "https://k/f/1", Color: statusColors[firing.Confirmed]}
+	att := slackAttachments(c)[0].(map[string]any)
+	if att["color"] != "#15803d" {
+		t.Errorf("attachment color = %v", att["color"])
+	}
+	if blocks, ok := att["blocks"].([]any); !ok || len(blocks) != 2 {
+		t.Errorf("attachment blocks = %v", att["blocks"])
+	}
+	// A card with no colour (never sent today) must not paint a black bar.
+	if _, ok := slackAttachments(Card{Title: "x"})[0].(map[string]any)["color"]; ok {
+		t.Error("uncoloured card should have no attachment color")
+	}
+}
+
 func TestSlackEscaping(t *testing.T) {
 	c := Card{Title: "A <b> & c", Lines: []string{"x > y"}, URL: "https://k/f/1"}
 	text := slackBlocks(c)[0].(map[string]any)["text"].(map[string]string)["text"]
