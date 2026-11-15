@@ -149,8 +149,17 @@ func (s *Server) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 			return nil, err
 		}
 		note := fmt.Sprintf("%s requested %d%%", u.DisplayName, in.SharePct)
-		return requestWarnings(f, approved, in.SharePct, v.compat),
-			s.logEvent(ctx, q, f, u, firing.EventRequestSubmitted, nil, nil, &note)
+		if err := s.logEvent(ctx, q, f, u, firing.EventRequestSubmitted, nil, nil, &note); err != nil {
+			return nil, err
+		}
+		// Tell each kiln master someone asked to join (open question 3: alert all).
+		kms, err := q.ListKilnMasterIDs(ctx)
+		if err != nil {
+			return nil, err
+		}
+		n.DM(kms, notify.AlertRequestReceived(f, s.studioLocation(ctx, q), u.DisplayName, in.SharePct,
+			notify.FiringURL(s.cfg.AppBaseURL, f.ID)))
+		return requestWarnings(f, approved, in.SharePct, v.compat), nil
 	})
 }
 

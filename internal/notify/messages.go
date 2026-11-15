@@ -65,7 +65,12 @@ func DMReady(f db.Firing, loc *time.Location, url string) string {
 	return fmt.Sprintf("✅ %s is ready for pickup!\n%s", Describe(f, loc), url)
 }
 
-// ── Kiln-master alerts (M4 jobs) ────────────────────────────────────────────
+// ── Kiln-master alerts ──────────────────────────────────────────────────────
+
+// AlertRequestReceived tells the kiln masters someone asked to join a firing.
+func AlertRequestReceived(f db.Firing, loc *time.Location, requester string, share int32, url string) string {
+	return fmt.Sprintf("📩 %s requested %d%% in %s.\n%s", requester, share, Describe(f, loc), url)
+}
 
 func AlertUnderfilled(f db.Firing, loc *time.Location, pct int, unconfirmed bool, url string) string {
 	s := fmt.Sprintf("⚠️ %s is only %d%% full and requests are closed", Describe(f, loc), pct)

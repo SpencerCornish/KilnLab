@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -76,7 +77,7 @@ func TestActionsEnqueueNotifications(t *testing.T) {
 	id := func(c *apiClient) int64 {
 		return int64(jget(c.mustDo("GET", "/api/me", nil, http.StatusOK), "id").(float64))
 	}
-	aliceID, bobID, carolID := id(alice), id(bob), id(carol)
+	aliceID, bobID, carolID, kimID := id(alice), id(bob), id(carol), id(km)
 
 	d := alice.mustDo("POST", "/api/firings", map[string]any{"firing_type": "glaze", "cone": "6",
 		"scheduled_date": dayOf(e.now.Add(72 * time.Hour)), "description": "mugs", "share_pct": 30}, http.StatusCreated)
@@ -86,12 +87,22 @@ func TestActionsEnqueueNotifications(t *testing.T) {
 		t.Fatalf("on create: %+v", rows)
 	}
 
+	// A new request refreshes the main message and DMs every kiln master.
 	d = bob.mustDo("POST", base+"/requests", map[string]any{"description": "bowls", "share_pct": 20, "cone": "6"}, http.StatusOK)
 	bobReq := int64(jget(d, "my_request", "id").(float64))
+	rows = drainOutbox(t, pool)
+	if got := dmRecipients(rows); !slices.Equal(got, []int64{kimID}) {
+		t.Fatalf("request DMs = %v, want the kiln master", got)
+	}
+	for _, r := range rows {
+		if r.kind == "dm" && !strings.Contains(r.text, "Bob requested 20%") {
+			t.Fatalf("request DM text = %q", r.text)
+		}
+	}
 	d = carol.mustDo("POST", base+"/requests", map[string]any{"description": "cups", "share_pct": 20, "cone": "6"}, http.StatusOK)
 	carolReq := int64(jget(d, "my_request", "id").(float64))
-	if rows = drainOutbox(t, pool); len(dmRecipients(rows)) != 0 || len(rows) != 4 {
-		t.Fatalf("requests should only refresh the main message: %+v", rows)
+	if got := dmRecipients(drainOutbox(t, pool)); !slices.Equal(got, []int64{kimID}) {
+		t.Fatalf("second request DMs = %v", got)
 	}
 
 	// Approve → DM the requester only.
