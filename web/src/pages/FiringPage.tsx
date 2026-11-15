@@ -58,7 +58,7 @@ export default function FiringPage() {
     return (
       <div className="space-y-4">
         <Alert kind="error">{error === 'not found' ? 'That firing does not exist.' : error}</Alert>
-        <Link to="/" className="btn border-2 border-stone-300 bg-white">
+        <Link to="/" className="kc-key kc-key--block">
           Home
         </Link>
       </div>
@@ -96,15 +96,15 @@ export default function FiringPage() {
     <div className="space-y-5">
       {/* Header */}
       <section className="space-y-2">
-        <Link to="/" className="text-sm font-semibold text-stone-500">
+        <Link to="/" className="kc-back">
           ← All firings
         </Link>
         <div className="flex flex-wrap items-center gap-2">
-          <h1 className="text-2xl font-bold">{firingTitle(f)}</h1>
+          <h1 className="kc-title">{firingTitle(f)}</h1>
           <StatusBadge status={f.status} />
         </div>
-        <p className="text-lg">{formatDate(f.scheduled_date)}</p>
-        <p className="text-stone-600">
+        <p className="kc-data">{formatDate(f.scheduled_date)}</p>
+        <p className="kc-caption kc-caption--body">
           <span className="capitalize">{f.firing_type}</span> · Cone {f.cone}
           {kilnLabel(options, f.kiln_id) && ` · ${kilnLabel(options, f.kiln_id)}`} · proposed by {f.proposer.name}
         </p>
@@ -125,23 +125,29 @@ export default function FiringPage() {
 
       {/* Fullness + requests window */}
       {f.status !== 'cancelled' && (
-        <section className="card space-y-3">
-          <FullnessBar fullness={f.fullness} large />
-          <p className="text-sm text-stone-600">
-            {f.requests_open
-              ? `Requests close ${formatWhen(f.requests_close_at, tz)} (${relative(f.requests_close_at)}).`
-              : f.requests_closed_manually
-                ? 'Requests closed by a kiln master.'
-                : 'Requests are closed.'}
-          </p>
-          {f.notes && <p className="whitespace-pre-wrap border-t border-stone-200 pt-3">{f.notes}</p>}
+        <section className="kc-plate">
+          <header className="kc-plate__head">
+            <span className="kc-label">Capacity</span>
+            {f.fullness.overridden && <span className="kc-tag kc-tag--flag">Set by kiln master</span>}
+          </header>
+          <div className="kc-plate__body kc-plate__body--tight">
+            <FullnessBar fullness={f.fullness} large />
+            <p className="kc-caption kc-caption--body">
+              {f.requests_open
+                ? `Requests close ${formatWhen(f.requests_close_at, tz)} (${relative(f.requests_close_at)}).`
+                : f.requests_closed_manually
+                  ? 'Requests closed by a kiln master.'
+                  : 'Requests are closed.'}
+            </p>
+            {f.notes && <p className="kc-caption kc-caption--body whitespace-pre-wrap">{f.notes}</p>}
+          </div>
         </section>
       )}
 
       {/* Lifecycle: next steps (same as the kiln QR page) + recorded times */}
       {detail.can.next_steps.length > 0 && (
-        <section className="space-y-3">
-          <h2 className="text-lg font-bold">Update status</h2>
+        <section className="space-y-4">
+          <h2 className="kc-title kc-title--sm">Update status</h2>
           <LifecyclePanel
             detail={detail}
             options={options}
@@ -164,26 +170,26 @@ export default function FiringPage() {
         />
       ) : (
         can.request && (
-          <button onClick={() => setSheet({ kind: 'request' })} className="btn bg-orange-600 text-white">
+          <button onClick={() => setSheet({ kind: 'request' })} className="kc-key kc-key--block kc-key--fire">
             Request space
           </button>
         )
       )}
 
       {/* Who's in */}
-      <section className="space-y-3">
-        <h2 className="text-lg font-bold">Who's in</h2>
-        <div className="card space-y-1">
+      <section className="space-y-4">
+        <h2 className="kc-title kc-title--sm">Who's in</h2>
+        <article className="kc-plate kc-plate--pad space-y-2">
           <div className="flex items-baseline justify-between gap-2">
-            <span className="font-semibold">{f.proposer.name}</span>
-            <span className="font-bold tabular-nums">{f.proposer_share_pct}%</span>
+            <span className="kc-label">{f.proposer.name}</span>
+            <span className="kc-value">{f.proposer_share_pct}%</span>
           </div>
-          <p className="text-stone-700">{f.proposer_description}</p>
-          <p className="text-sm text-stone-500">
+          <p className="kc-caption kc-caption--body">{f.proposer_description}</p>
+          <p className="kc-data kc-muted">
             Proposer · Cone {f.proposer_cone}
             {f.proposer_clay_body && ` · ${f.proposer_clay_body}`}
           </p>
-        </div>
+        </article>
         {detail.requests.map((r) => (
           <RequestCard
             key={r.id}
@@ -195,16 +201,16 @@ export default function FiringPage() {
 
       {/* Kiln master controls */}
       {kmControls && (
-        <section className="space-y-3">
-          <h2 className="text-lg font-bold">Kiln master</h2>
-          <div className="grid grid-cols-2 gap-3">
+        <section className="space-y-4">
+          <h2 className="kc-title kc-title--sm">Kiln master</h2>
+          <div className="kc-keys kc-keys--grid">
             {can.confirm && (
-              <button disabled={busy} onClick={() => run(() => act.confirm(f.id))} className="btn col-span-2 bg-green-700 text-white">
+              <button disabled={busy} onClick={() => run(() => act.confirm(f.id))} className="kc-key kc-key--block kc-key--go">
                 Confirm firing
               </button>
             )}
             {can.release && (
-              <button onClick={() => setSheet({ kind: 'release' })} className="btn col-span-2 bg-green-700 text-white">
+              <button onClick={() => setSheet({ kind: 'release' })} className="kc-key kc-key--block kc-key--go">
                 Release hold
               </button>
             )}
@@ -217,7 +223,7 @@ export default function FiringPage() {
               </KmButton>
             )}
             {can.cancel && (
-              <button onClick={() => setSheet({ kind: 'cancel' })} className="btn border-2 border-red-300 bg-white text-base text-red-700">
+              <button onClick={() => setSheet({ kind: 'cancel' })} className="kc-key kc-key--danger flex-1">
                 Cancel firing
               </button>
             )}
@@ -242,7 +248,7 @@ export default function FiringPage() {
 
 function KmButton({ children, ...props }: { children: ReactNode; onClick: () => void; disabled?: boolean }) {
   return (
-    <button {...props} className="btn border-2 border-stone-900 bg-white text-base">
+    <button {...props} className="kc-key flex-1">
       {children}
     </button>
   )
@@ -250,86 +256,92 @@ function KmButton({ children, ...props }: { children: ReactNode; onClick: () => 
 
 // ── Requests ────────────────────────────────────────────────────────────────
 
-const REQUEST_STATUS_STYLES: Record<FiringRequest['status'], string> = {
-  pending: 'bg-amber-100 text-amber-900',
-  approved: 'bg-green-100 text-green-900',
-  declined: 'bg-red-100 text-red-900',
-  withdrawn: 'bg-stone-200 text-stone-600',
+const REQUEST_STATUS: Record<FiringRequest['status'], { className: string; label: string }> = {
+  pending: { className: 'kc-tag--flag', label: 'Pending' },
+  approved: { className: 'kc-tag--go', label: 'Approved' },
+  declined: { className: 'kc-tag--stop', label: 'Declined' },
+  withdrawn: { className: 'kc-tag--void', label: 'Withdrawn' },
 }
 
-function RequestStatusChip({ status }: { status: FiringRequest['status'] }) {
-  return <span className={`rounded-full px-2 py-0.5 text-sm font-semibold capitalize ${REQUEST_STATUS_STYLES[status]}`}>{status}</span>
+function RequestStatusTag({ status }: { status: FiringRequest['status'] }) {
+  const s = REQUEST_STATUS[status]
+  return <span className={`kc-tag ${s.className}`}>{s.label}</span>
 }
 
 function RequestDetails({ r }: { r: FiringRequest }) {
   return (
     <>
-      <p className="text-stone-700">{r.description}</p>
-      <p className="text-sm text-stone-500">
+      <p className="kc-caption kc-caption--body">{r.description}</p>
+      <p className="kc-data kc-muted">
         Cone {r.cone}
         {r.glazed && ' · glazed'}
         {r.clay_body && ` · ${r.clay_body}`}
       </p>
-      {r.compatibility_warning && <p className="text-sm font-semibold text-amber-800">⚠ {r.compatibility_warning}</p>}
-      {r.decision_note && <p className="text-sm text-stone-600">Kiln master: “{r.decision_note}”</p>}
+      {r.compatibility_warning && <p className="kc-warning">⚠ {r.compatibility_warning}</p>}
+      {r.decision_note && <p className="kc-caption kc-caption--body">Kiln master: “{r.decision_note}”</p>}
     </>
   )
 }
 
 function MyRequest({ request: r, onEdit, onWithdraw }: { request: FiringRequest; onEdit: () => void; onWithdraw: () => void }) {
   return (
-    <section className="card space-y-2 border-2 border-orange-300">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="text-lg font-bold">Your request</h2>
-        <RequestStatusChip status={r.status} />
+    <section className="kc-plate kc-plate--accent">
+      <header className="kc-plate__head">
+        <span className="kc-label">Your request</span>
+        <RequestStatusTag status={r.status} />
+      </header>
+      <div className="kc-plate__body kc-plate__body--tight">
+        <p className="kc-value">{r.estimated_share_pct}%</p>
+        <RequestDetails r={r} />
+        {(r.can.edit || r.can.withdraw) && (
+          <div className="kc-keys kc-keys--fill pt-2">
+            {r.can.edit && (
+              <button onClick={onEdit} className="kc-key">
+                Edit
+              </button>
+            )}
+            {r.can.withdraw && (
+              <button onClick={onWithdraw} className="kc-key">
+                Withdraw
+              </button>
+            )}
+          </div>
+        )}
       </div>
-      <p className="text-2xl font-bold tabular-nums">{r.estimated_share_pct}%</p>
-      <RequestDetails r={r} />
-      {(r.can.edit || r.can.withdraw) && (
-        <div className="grid grid-cols-2 gap-3 pt-2">
-          {r.can.edit && (
-            <button onClick={onEdit} className="btn border-2 border-stone-900 bg-white text-base">
-              Edit
-            </button>
-          )}
-          {r.can.withdraw && (
-            <button onClick={onWithdraw} className="btn border-2 border-stone-300 bg-white text-base text-stone-700">
-              Withdraw
-            </button>
-          )}
-        </div>
-      )}
     </section>
   )
 }
 
 function RequestCard({ request: r, onDecide }: { request: FiringRequest; onDecide: (d: 'approve' | 'decline') => void }) {
+  const inactive = r.status === 'declined' || r.status === 'withdrawn'
   return (
-    <div className={`card space-y-1 ${r.status === 'declined' || r.status === 'withdrawn' ? 'opacity-60' : ''}`}>
-      <div className="flex items-center justify-between gap-2">
-        <span className="flex min-w-0 items-center gap-2">
-          {r.user_avatar_url && <img src={r.user_avatar_url} alt="" className="size-7 rounded-full" />}
-          <span className="truncate font-semibold">{r.user.name}</span>
-          <RequestStatusChip status={r.status} />
+    <article className={`kc-plate${inactive ? ' opacity-60' : ''}`}>
+      <header className="kc-plate__head">
+        <span className="kc-request__who min-w-0">
+          {r.user_avatar_url && <img src={r.user_avatar_url} alt="" className="kc-avatar size-7" />}
+          <span className="truncate">{r.user.name}</span>
+          <RequestStatusTag status={r.status} />
         </span>
-        <span className="font-bold tabular-nums">{r.estimated_share_pct}%</span>
+        <span className="kc-value">{r.estimated_share_pct}%</span>
+      </header>
+      <div className="kc-plate__body kc-plate__body--tight">
+        <RequestDetails r={r} />
+        {r.can.decide && (
+          <div className="kc-keys kc-keys--fill pt-2">
+            {r.status !== 'approved' && (
+              <button onClick={() => onDecide('approve')} className="kc-key kc-key--go">
+                Approve
+              </button>
+            )}
+            {r.status !== 'declined' && (
+              <button onClick={() => onDecide('decline')} className="kc-key kc-key--danger">
+                Decline
+              </button>
+            )}
+          </div>
+        )}
       </div>
-      <RequestDetails r={r} />
-      {r.can.decide && (
-        <div className="grid grid-cols-2 gap-3 pt-2">
-          {r.status !== 'approved' && (
-            <button onClick={() => onDecide('approve')} className="btn bg-green-700 text-base text-white">
-              Approve
-            </button>
-          )}
-          {r.status !== 'declined' && (
-            <button onClick={() => onDecide('decline')} className="btn border-2 border-red-300 bg-white text-base text-red-700">
-              Decline
-            </button>
-          )}
-        </div>
-      )}
-    </div>
+    </article>
   )
 }
 
@@ -373,13 +385,13 @@ function RequestForm({
           value={r.description}
           onChange={(e) => set('description', e.target.value)}
           placeholder="4 mugs, 2 medium bowls"
-          className={inputClass}
+          className="kc-textarea"
         />
       </Field>
       <ShareInput value={r.share_pct} onChange={(v) => set('share_pct', v)} kiln={options.kilns.find((k) => k.id === firing.kiln_id)} />
       <ConeSelect value={r.cone} onChange={(v) => set('cone', v)} cones={options.cones} label="Cone your work is for" />
-      <label className="flex min-h-12 items-center gap-3 text-lg">
-        <input type="checkbox" checked={r.glazed} onChange={(e) => set('glazed', e.target.checked)} className="size-6 accent-orange-600" />
+      <label className="kc-check">
+        <input type="checkbox" checked={r.glazed} onChange={(e) => set('glazed', e.target.checked)} className="kc-checkbox" />
         My work is glazed
       </label>
       <Field label="Clay body (optional)">
@@ -392,7 +404,7 @@ function RequestForm({
           ))}
         </Alert>
       )}
-      <button type="submit" disabled={busy} className="btn bg-orange-600 text-white">
+      <button type="submit" disabled={busy} className="kc-key kc-key--block kc-key--fire">
         {busy ? 'Saving…' : submitLabel}
       </button>
     </form>
@@ -476,7 +488,7 @@ function ActionSheets({
           danger={decision === 'decline'}
           onSubmit={(note) => run(() => act.decide(f.id, r.id, decision, note || null))}
         >
-          <p className="text-stone-700">
+          <p className="kc-caption kc-caption--body">
             {r.estimated_share_pct}% · {r.description}
           </p>
           {r.compatibility_warning && <Alert kind="warning">{r.compatibility_warning}</Alert>}
@@ -488,7 +500,7 @@ function ActionSheets({
       title = 'Put on hold'
       body = (
         <ReasonForm label="Why? (shown to everyone)" required busy={busy} submitLabel="Put on hold" onSubmit={(reason) => run(() => act.hold(f.id, reason))}>
-          <p className="text-stone-600">Requests stay open unless you close them.</p>
+          <p className="kc-caption kc-caption--body">Requests stay open unless you close them.</p>
         </ReasonForm>
       )
       break
@@ -496,7 +508,7 @@ function ActionSheets({
       title = 'Cancel this firing?'
       body = (
         <ReasonForm label="Why? (shown to everyone)" required danger busy={busy} submitLabel="Cancel firing" onSubmit={(reason) => run(() => act.cancel(f.id, reason))}>
-          <p className="text-stone-600">Everyone in the firing will be told. This can't be undone.</p>
+          <p className="kc-caption kc-caption--body">Everyone in the firing will be told. This can't be undone.</p>
         </ReasonForm>
       )
       break
@@ -521,7 +533,7 @@ function ActionSheets({
           submitLabel="Release"
           onSubmit={(day) => run(() => act.release(f.id, day))}
         >
-          <p className="text-stone-600">Change the day if needed.</p>
+          <p className="kc-caption kc-caption--body">Change the day if needed.</p>
         </DayForm>
       )
       break
@@ -555,7 +567,7 @@ function ConfirmBody({ children, busy, label, danger, onConfirm }: { children: R
   return (
     <>
       {children}
-      <button disabled={busy} onClick={onConfirm} className={`btn text-white ${danger ? 'bg-red-700' : 'bg-orange-600'}`}>
+      <button disabled={busy} onClick={onConfirm} className={`kc-key kc-key--block ${danger ? 'kc-key--fire' : ''}`}>
         {busy ? 'Working…' : label}
       </button>
     </>
@@ -590,9 +602,9 @@ function ReasonForm({
     >
       {children}
       <Field label={label}>
-        <textarea rows={2} required={required} maxLength={500} value={text} onChange={(e) => setText(e.target.value)} className={inputClass} />
+        <textarea rows={2} required={required} maxLength={500} value={text} onChange={(e) => setText(e.target.value)} className="kc-textarea" />
       </Field>
-      <button type="submit" disabled={busy} className={`btn text-white ${danger ? 'bg-red-700' : 'bg-orange-600'}`}>
+      <button type="submit" disabled={busy} className={`kc-key kc-key--block ${danger ? 'kc-key--fire' : ''}`}>
         {busy ? 'Working…' : submitLabel}
       </button>
     </form>
@@ -628,9 +640,9 @@ function DayForm({
       <Field
         label="Day"
         hint={
-          <p className="mt-1 text-sm text-stone-500">
+          <span className="kc-caption kc-caption--body block">
             Firings are booked for a day; no start time is promised. Requests close moves with the day.
-          </p>
+          </span>
         }
       >
         <input type="date" required value={value} onChange={(e) => setValue(e.target.value)} className={inputClass} />
@@ -640,7 +652,7 @@ function DayForm({
           <input value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} className={inputClass} />
         </Field>
       )}
-      <button type="submit" disabled={busy} className="btn bg-orange-600 text-white">
+      <button type="submit" disabled={busy} className="kc-key kc-key--block kc-key--fire">
         {busy ? 'Working…' : submitLabel}
       </button>
     </form>
@@ -652,19 +664,19 @@ function FullnessForm({ detail, busy, onSubmit }: { detail: FiringDetail; busy: 
   const [pct, setPct] = useState(full.overridden ? full.display_pct : Math.min(full.calculated_pct, 100))
   return (
     <div className="space-y-4">
-      <p className="text-stone-600">
+      <p className="kc-caption kc-caption--body">
         Calculated from approved requests: <strong>{full.calculated_pct}%</strong>. Set what it really looks like.
       </p>
-      <div className="flex items-baseline justify-between">
-        <span className="font-semibold">Fullness</span>
-        <span className="text-2xl font-bold tabular-nums">{pct}%</span>
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="kc-field__label kc-field__label--flush">Fullness</span>
+        <span className="kc-value">{pct}%</span>
       </div>
-      <input type="range" min={0} max={100} value={pct} onChange={(e) => setPct(Number(e.target.value))} className="h-10 w-full accent-orange-600" aria-label="Fullness percent" />
-      <button disabled={busy} onClick={() => onSubmit(pct)} className="btn bg-orange-600 text-white">
+      <input type="range" min={0} max={100} value={pct} onChange={(e) => setPct(Number(e.target.value))} className="kc-range" aria-label="Fullness percent" />
+      <button disabled={busy} onClick={() => onSubmit(pct)} className="kc-key kc-key--block kc-key--fire">
         Set to {pct}%
       </button>
       {full.overridden && (
-        <button disabled={busy} onClick={() => onSubmit(null)} className="btn border-2 border-stone-300 bg-white text-base">
+        <button disabled={busy} onClick={() => onSubmit(null)} className="kc-key kc-key--block">
           Use calculated ({Math.min(full.calculated_pct, 100)}%)
         </button>
       )}
@@ -692,22 +704,21 @@ function describe(e: FiringEvent): string {
 function Timeline({ events, tz }: { events: FiringEvent[]; tz: string }) {
   if (events.length === 0) return null
   return (
-    <section className="space-y-3">
-      <h2 className="text-lg font-bold">Timeline</h2>
-      <ol className="space-y-3 border-l-2 border-stone-300 pl-4">
+    <section className="space-y-4">
+      <h2 className="kc-title kc-title--sm">Timeline</h2>
+      <ol className="kc-log kc-log--stack">
         {[...events].reverse().map((e) => {
           const what = describe(e)
           return (
-            <li key={e.id} className="relative">
-              <span className="absolute -left-[1.4rem] top-1.5 size-3 rounded-full bg-stone-400" />
-              <p className="text-sm text-stone-500">
+            <li key={e.id}>
+              <span className="kc-log__time">
                 {formatWhen(e.occurred_at, tz)}
                 {e.actor && ` · ${e.actor.name}`}
                 {e.source === 'kiln_qr' && ' · kiln QR'}
                 {e.source === 'system' && ' · automatic'}
-              </p>
-              {what && <p className="font-medium">{what}</p>}
-              {e.note && <p className={what ? 'text-stone-600' : 'font-medium'}>{e.note}</p>}
+              </span>
+              {what && <p className="kc-label">{what}</p>}
+              {e.note && <p className={what ? 'kc-caption kc-caption--body' : 'kc-label'}>{e.note}</p>}
             </li>
           )
         })}

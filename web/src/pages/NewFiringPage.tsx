@@ -62,19 +62,20 @@ function ProposeForm({ options }: { options: Options }) {
 
   return (
     <form onSubmit={submit} className="space-y-5">
-      <h1 className="text-2xl font-bold">Propose a firing</h1>
+      <h1 className="kc-title">Propose a firing</h1>
 
       {activeKilns.length === 0 && <Alert kind="error">There are no active kilns. Ask an admin.</Alert>}
       {activeKilns.length > 1 && (
         <fieldset>
-          <legend className="font-semibold">Kiln</legend>
-          <div className="mt-1 grid gap-2">
+          <legend className="kc-field__label">Kiln</legend>
+          <div className="kc-keys kc-keys--fill">
             {activeKilns.map((k) => (
               <button
                 key={k.id}
                 type="button"
+                aria-pressed={kilnId === k.id}
                 onClick={() => setKilnId(k.id)}
-                className={`rounded-xl border-2 px-4 py-3 text-left text-lg font-semibold ${kilnId === k.id ? 'border-orange-600 bg-orange-50' : 'border-stone-300 bg-white'}`}
+                className="kc-key"
               >
                 {k.name}
               </button>
@@ -84,14 +85,15 @@ function ProposeForm({ options }: { options: Options }) {
       )}
 
       <fieldset>
-        <legend className="font-semibold">Type</legend>
-        <div className="mt-1 grid grid-cols-3 gap-2">
+        <legend className="kc-field__label">Type</legend>
+        <div className="kc-keys kc-keys--fill">
           {options.firing_types.map((t) => (
             <button
               key={t}
               type="button"
+              aria-pressed={firingType === t}
               onClick={() => setFiringType(t)}
-              className={`rounded-xl border-2 py-3 text-lg font-semibold capitalize ${firingType === t ? 'border-orange-600 bg-orange-50' : 'border-stone-300 bg-white'}`}
+              className="kc-key capitalize"
             >
               {t}
             </button>
@@ -104,13 +106,13 @@ function ProposeForm({ options }: { options: Options }) {
       <Field
         label="Day"
         hint={
-          <p className="mt-1 text-sm text-stone-500">
+          <span className="kc-caption kc-caption--body block">
             Firings are booked for a day. There's no start time to hold to: the kiln runs sometime that day.{' '}
             {canBypass
               ? 'As a kiln master you can skip the minimum notice.'
               : `The day has to start at least ${options.min_notice_hours} hours from now.`}{' '}
             Requests close {options.request_cutoff_hours}h before the day starts.
-          </p>
+          </span>
         }
       >
         <input
@@ -123,8 +125,8 @@ function ProposeForm({ options }: { options: Options }) {
         />
       </Field>
 
-      <div className="card space-y-4">
-        <h2 className="text-lg font-bold">Your work</h2>
+      <div className="kc-plate kc-plate--pad space-y-4">
+        <h2 className="kc-title kc-title--sm">Your work</h2>
         <Field label="What are you putting in?">
           <textarea
             required
@@ -133,7 +135,7 @@ function ProposeForm({ options }: { options: Options }) {
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="4 mugs, 2 medium bowls, 1 tall vase"
-            className={inputClass}
+            className="kc-textarea"
           />
         </Field>
         <ShareInput value={share} onChange={setShare} kiln={activeKilns.find((k) => k.id === kilnId)} />
@@ -142,21 +144,21 @@ function ProposeForm({ options }: { options: Options }) {
         </Field>
       </div>
 
-      <details className="card">
-        <summary className="cursor-pointer font-semibold">More (title, notes)</summary>
+      <details className="kc-plate kc-plate--pad">
+        <summary className="kc-field__label cursor-pointer">More (title, notes)</summary>
         <div className="mt-4 space-y-4">
           <Field label="Title (optional)">
             <input value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} placeholder={`Cone ${cone} ${firingType}`} className={inputClass} />
           </Field>
           <Field label="Notes (optional)">
-            <textarea rows={3} maxLength={2000} value={notes} onChange={(e) => setNotes(e.target.value)} className={inputClass} />
+            <textarea rows={3} maxLength={2000} value={notes} onChange={(e) => setNotes(e.target.value)} className="kc-textarea" />
           </Field>
         </div>
       </details>
 
       {err && <Alert kind="error">{err}</Alert>}
 
-      <button type="submit" disabled={busy || activeKilns.length === 0} className="btn bg-orange-600 text-white">
+      <button type="submit" disabled={busy || activeKilns.length === 0} className="kc-key kc-key--block kc-key--fire">
         {busy ? 'Proposing…' : 'Propose firing'}
       </button>
     </form>

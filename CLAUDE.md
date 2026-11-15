@@ -14,7 +14,7 @@ Read before starting work:
 - Permissions are enforced on the server. Only kiln masters can start the kiln.
 - Notification failures must never block a state change; all sends go through `notification_outbox`.
 - Use current dependency versions (look them up); don't copy BookLab's pins.
-- Mobile-first UI with large tap targets (`.btn`, `.card` in `web/src/index.css`).
+- Mobile-first UI with large tap targets. Use the Kiln Control design system classes (`.kc-key`, `.kc-plate`, `.kc-input`, …) from `web/src/styles/kiln-control.css`; tokens live in `web/src/styles/tokens.css`. The reference spec is in `kiln-control/`.
 
 ## Workflow
 - Schema change: add `internal/db/migrations/00N_*.up.sql` and `.down.sql`, then `make sqlc`. Never edit generated `internal/db/*.go` (except `connect.go`, which is hand-written).

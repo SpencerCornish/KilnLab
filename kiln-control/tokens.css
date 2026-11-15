@@ -1,0 +1,39 @@
+/* Kiln Control tokens. Generated from the design system: edit there, then regenerate. */
+:root {
+  /* color */
+  --panel: #d8d2c0;
+  --panel-raised: #e6e1d2;
+  --bezel: #1a1b18;
+  --bezel-muted: #8a8674;
+  --segment-off: #3a3b34;
+  --ink: #20211d;
+  --ink-muted: #55564c;
+  --rule: #6f6b5a;
+  --kiln-orange: #c8451b;
+  --cobalt: #1f4e8c;
+  --on-fill: #ffffff;
+  --readout-red: #ff3b1f;
+  --readout-amber: #ffb000;
+  --readout-green: #3ddc6a;
+  /* spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  /* radius */
+  --radius-plate: 0px;
+  --radius-key: 2px;
+  --radius-lamp: 50%;
+  /* shadow */
+  --key-up: 0 3px 0 #20211d;
+  --key-down: 0 1px 0 #20211d;
+  --well: inset 0 2px 0 #6f6b5a;
+  /* size */
+  --tap-min: 56px;
+  --tap-lg: 72px;
+  /* fonts */
+  --font-display: "Barlow Condensed", "Arial Narrow", sans-serif;
+  --font-sans: "Barlow", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "Share Tech Mono", "Courier New", monospace;
+}

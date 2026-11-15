@@ -53,7 +53,7 @@ export function RequireLogin({ children }: { children: ReactNode }) {
 export function PageSpinner() {
   return (
     <div className="flex min-h-[50vh] items-center justify-center" role="status" aria-label="Loading">
-      <div className="size-10 animate-spin rounded-full border-4 border-stone-300 border-t-orange-600" />
+      <div className="kc-spinner" />
     </div>
   )
 }

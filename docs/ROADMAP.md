@@ -12,6 +12,8 @@ _Last updated: 2026-11-11, end of M4 (signed off). M3 committed as `c6a2634`. v1
 
 _Post-M4 owner testing changes: unloaded, ready for pickup and completed merged into one `completed` step (migration 004, [DECISIONS](DECISIONS.md) #13). Also: firings are booked by day, not start time (migration 005, [DECISIONS](DECISIONS.md) #14), and the loader role is gone: anyone signed in can say they've loaded or unloaded (migration 006, #15). The owner has more changes to come._
 
+_2026-11-14 UI refresh: the **Kiln Control** design system is applied across the SPA (D47): plain `kc-*` classes + tokens in `web/src/styles/`, self-hosted fonts, 56px tap targets, and segmented capacity meters. Layouts checked at 320px and 390px wide; still worth a pass on a real phone._
+
 ---
 
 ## Milestone summary

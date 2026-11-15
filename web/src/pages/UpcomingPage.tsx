@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
-import { Alert, firingTitle, FullnessBar, STATUS_LABELS } from '../components/firing'
+import { Alert, firingTitle, FullnessBar, StatusBadge } from '../components/firing'
 import { getUpcoming } from '../lib/api'
 import { PageSpinner, useSession } from '../lib/session'
 import { dayParts, formatWhen } from '../lib/time'
@@ -9,12 +9,6 @@ import { useLoad } from '../lib/useLoad'
 
 // Public wording (§9A): "on hold" reads as "waiting for more work" to visitors.
 const PUBLIC_LABELS: Partial<Record<FiringStatus, string>> = { on_hold: 'Waiting for more work' }
-
-const PUBLIC_STYLES: Partial<Record<FiringStatus, string>> = {
-  proposed: 'bg-sky-100 text-sky-900',
-  on_hold: 'bg-amber-100 text-amber-900',
-  confirmed: 'bg-green-100 text-green-900',
-}
 
 const IN_KILN = new Set<FiringStatus>(['loading', 'loaded', 'firing', 'cooling'])
 
@@ -29,20 +23,20 @@ export default function UpcomingPage() {
 
   return (
     <div className="space-y-6">
-      <section className="space-y-1">
-        <h1 className="text-2xl font-bold">Upcoming kiln firings</h1>
-        <p className="text-stone-600">
+      <section className="space-y-2">
+        <h1 className="kc-title">Upcoming kiln firings</h1>
+        <p className="kc-caption kc-caption--body">
           Have work to fire? Request space in a firing below, or propose a new one.
           {!me && ' You’ll sign in with Discord or Slack.'}
         </p>
       </section>
 
-      <div className="grid grid-cols-2 gap-3">
-        <Link to="/firings/new" className="btn col-span-2 bg-orange-600 text-white">
+      <div className="kc-keys">
+        <Link to="/firings/new" className="kc-key kc-key--block kc-key--fire">
           + Propose a firing
         </Link>
         {me && (
-          <Link to="/" className="btn col-span-2 border-2 border-stone-300 bg-white text-base">
+          <Link to="/" className="kc-key kc-key--block">
             My firings
           </Link>
         )}
@@ -53,8 +47,10 @@ export default function UpcomingPage() {
       {data && (
         <section className="space-y-3">
           {data.firings.length === 0 ? (
-            <div className="card text-center text-stone-600">
-              Nothing scheduled in the next {data.days_ahead} days. Be the first to propose a firing!
+            <div className="kc-plate kc-plate--pad text-center">
+              <p className="kc-caption kc-caption--body">
+                Nothing scheduled in the next {data.days_ahead} days. Be the first to propose a firing!
+              </p>
             </div>
           ) : (
             data.firings.map((f) => <PublicFiringCard key={f.id} firing={f} tz={data.timezone} />)
@@ -72,52 +68,45 @@ function PublicFiringCard({ firing: f, tz }: { firing: PublicFiring; tz: string 
   const inKiln = IN_KILN.has(f.status)
   const people = `${f.participant_count} ${f.participant_count === 1 ? 'participant' : 'participants'}`
   return (
-    <article className="card space-y-3">
-      <div className="flex gap-4">
-        <div className="flex w-14 shrink-0 flex-col items-center justify-center rounded-xl bg-stone-900 py-2 text-white">
-          <span className="text-xs uppercase">{d.weekday}</span>
-          <span className="text-2xl font-bold leading-none">{d.day}</span>
-          <span className="text-xs uppercase">{d.month}</span>
-        </div>
-        <div className="min-w-0 flex-1 space-y-1">
-          <h2 className="text-lg font-bold">{firingTitle(f)}</h2>
-          <p className="text-sm text-stone-600">
-            {f.kiln_name && `${f.kiln_name} · `}{people}
-          </p>
-          <span
-            className={`inline-block rounded-full px-2.5 py-0.5 text-sm font-semibold ${
-              inKiln ? 'bg-red-600 text-white' : PUBLIC_STYLES[f.status] ?? 'bg-stone-200 text-stone-700'
-            }`}
-          >
-            {PUBLIC_LABELS[f.status] ?? STATUS_LABELS[f.status]}
-          </span>
-        </div>
-      </div>
-
-      {inKiln ? (
-        <p className="text-stone-700">
-          In the kiln now
-          {f.estimated_unload_at && ` · est. unload ${formatWhen(f.estimated_unload_at, tz)}`}
+    <article className="kc-plate">
+      <header className="kc-plate__head">
+        <span className="kc-label kc-label--date">
+          {d.weekday} {d.month} {d.day}
+        </span>
+        <StatusBadge status={f.status} label={PUBLIC_LABELS[f.status]} />
+      </header>
+      <div className="kc-plate__body kc-plate__body--tight">
+        <h2 className="kc-title kc-title--sm">{firingTitle(f)}</h2>
+        <p className="kc-caption kc-caption--body">
+          {f.kiln_name && `${f.kiln_name} · `}
+          {people}
         </p>
-      ) : (
-        <>
-          <FullnessBar
-            fullness={{ display_pct: f.fullness_pct, room_left_pct: f.room_left_pct, calculated_pct: f.fullness_pct, overridden: false }}
-          />
-          <p className="text-sm text-stone-600">
-            {f.requests_open ? `Requests close ${formatWhen(f.requests_close_at, tz)}` : 'Requests closed'}
-          </p>
-          {f.requests_open ? (
-            <Link to={`/firings/${f.id}?request=1`} className="btn bg-stone-900 text-white">
-              Request space
-            </Link>
-          ) : (
-            <Link to={`/firings/${f.id}`} className="btn border-2 border-stone-300 bg-white text-base">
-              Details
-            </Link>
-          )}
-        </>
-      )}
+
+        {inKiln ? (
+          <>
+            <p className="kc-data">In the kiln now</p>
+            {f.estimated_unload_at && <p className="kc-data kc-muted">Est. unload {formatWhen(f.estimated_unload_at, tz)}</p>}
+          </>
+        ) : (
+          <>
+            <FullnessBar
+              fullness={{ display_pct: f.fullness_pct, room_left_pct: f.room_left_pct, calculated_pct: f.fullness_pct, overridden: false }}
+            />
+            <p className="kc-caption kc-caption--body">
+              {f.requests_open ? `Requests close ${formatWhen(f.requests_close_at, tz)}` : 'Requests closed'}
+            </p>
+            {f.requests_open ? (
+              <Link to={`/firings/${f.id}?request=1`} className="kc-key kc-key--block kc-key--fire">
+                Request space
+              </Link>
+            ) : (
+              <Link to={`/firings/${f.id}`} className="kc-key kc-key--block">
+                Details
+              </Link>
+            )}
+          </>
+        )}
+      </div>
     </article>
   )
 }
@@ -136,18 +125,22 @@ function CalendarLink() {
     }
   }
   return (
-    <section className="card space-y-2">
-      <h2 className="font-bold">Kiln calendar</h2>
-      <p className="text-sm text-stone-600">Subscribe to see upcoming firings in your calendar app.</p>
-      <div className="flex flex-wrap gap-2">
-        <a href={webcal} className="rounded-lg bg-stone-100 px-3 py-2 font-semibold text-orange-700">
-          Add to calendar
-        </a>
-        <button onClick={() => void copy()} className="rounded-lg bg-stone-100 px-3 py-2 font-semibold text-stone-700">
-          {copied ? 'Copied!' : 'Copy link'}
-        </button>
+    <section className="kc-plate">
+      <header className="kc-plate__head">
+        <span className="kc-label">Kiln calendar</span>
+      </header>
+      <div className="kc-plate__body kc-plate__body--tight">
+        <p className="kc-caption kc-caption--body">Subscribe to see upcoming firings in your calendar app.</p>
+        <div className="kc-keys">
+          <a href={webcal} className="kc-key kc-key--sm">
+            Add to calendar
+          </a>
+          <button onClick={() => void copy()} className="kc-key kc-key--sm">
+            {copied ? 'Copied!' : 'Copy link'}
+          </button>
+        </div>
+        <p className="kc-data break-all">{url}</p>
       </div>
-      <p className="break-all text-xs text-stone-500">{url}</p>
     </section>
   )
 }

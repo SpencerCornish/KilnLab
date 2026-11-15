@@ -31,31 +31,31 @@ export default function HomePage() {
 
   return (
     <div className="space-y-6">
-      <section className="flex items-center justify-between gap-3">
+      <section className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="truncate text-2xl font-bold">Hi, {me.display_name}</h1>
-          <p className="text-sm text-stone-600">
+          <h1 className="kc-title break-words">Hi, {me.display_name}</h1>
+          <p className="kc-caption kc-caption--body mt-1">
             {me.community === 'artlab' ? 'ArtLab · Discord' : 'BMS · Slack'}
             {roles.length > 0 && ` · ${roles.join(', ')}`}
           </p>
         </div>
-        <button onClick={signOut} className="shrink-0 rounded-lg px-3 py-2 text-sm font-semibold text-stone-600">
+        <button onClick={signOut} className="kc-key kc-key--sm shrink-0">
           Sign out
         </button>
       </section>
 
-      <div className="grid grid-cols-2 gap-3">
-        <Link to="/firings/new" className="btn col-span-2 bg-orange-600 text-white">
+      <div className="kc-keys kc-keys--fill">
+        <Link to="/firings/new" className="kc-key kc-key--block kc-key--fire">
           + Propose a firing
         </Link>
-        <Link to="/kiln" className="btn border-2 border-stone-900 bg-white text-base">
+        <Link to="/kiln" className="kc-key">
           Kiln check-in
         </Link>
-        <Link to="/upcoming" className="btn border-2 border-stone-300 bg-white text-base">
+        <Link to="/upcoming" className="kc-key">
           Public page
         </Link>
         {(me.roles.kiln_master || me.roles.admin) && (
-          <Link to="/admin" className="btn col-span-2 border-2 border-stone-300 bg-white text-base">
+          <Link to="/admin" className="kc-key kc-key--block">
             Admin
           </Link>
         )}
@@ -82,10 +82,10 @@ export default function HomePage() {
 
 function FiringList({ title, empty, firings, options }: { title: string; empty?: string; firings: FiringSummary[]; options: Options }) {
   return (
-    <section className="space-y-3">
-      <h2 className="text-lg font-bold">{title}</h2>
+    <section className="space-y-4">
+      <h2 className="kc-title kc-title--sm">{title}</h2>
       {firings.length === 0 ? (
-        <p className="text-stone-500">{empty}</p>
+        <p className="kc-caption kc-caption--body">{empty}</p>
       ) : (
         firings.map((f) => <FiringCard key={f.id} firing={f} options={options} />)
       )}
