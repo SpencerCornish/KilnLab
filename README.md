@@ -1,15 +1,18 @@
 # KilnLab
 
 Firing coordinator for a shared studio kiln used by two communities: ArtLab (Discord) and BMS (Slack).
-Members propose firings and request space in them. Kiln masters approve, run and track each firing,
-mostly from a phone after scanning a QR code on the studio wall. Product spec: [KILN_APP_SPEC.md](KILN_APP_SPEC.md).
+Members propose firings from per-kiln presets and request space in them. A kiln master takes
+responsibility for each firing, decides requests, starts the kiln, and anyone can unload it — mostly
+from a phone after scanning a QR code on the studio wall. Cooling and the ready-to-unload phase are
+driven automatically by the profile's rough firing and cooldown times.
+Product spec: [KILN_APP_SPEC.md](KILN_APP_SPEC.md).
 
 ## Stack
 
 The structure follows BookLab, with current dependency versions.
 
 - **Backend:** Go 1.27 (`cmd/server`, `cmd/seed`, plus `internal/{api,auth,config,db,firing,ical,jobs,notify,policy,webembed}`), chi router
-- **Database:** PostgreSQL 18 via pgx. Migrations are embedded and run on startup (golang-migrate). Queries are generated with **sqlc** from `internal/db/queries/*.sql`.
+- **Database:** PostgreSQL 18 via pgx. A single clean baseline migration is embedded and run on startup (golang-migrate). Queries are generated with **sqlc** from `internal/db/queries/*.sql`. The app is still pre-production, so schema changes replace the baseline and databases are reset; there is no migration path for old data yet.
 - **Frontend:** React 19 + TypeScript 7 SPA (Vite 8, Tailwind 4, react-router 8), embedded into the Go binary
 - **Auth:** Discord OAuth2 (ArtLab guild membership + Kiln Master role) and Sign in with Slack (OIDC, BMS workspace check), using `golang.org/x/oauth2`. Sessions are stored in the DB behind a cookie, with double-submit CSRF. With the bot tokens set, membership and the Kiln Master role are re-checked every hour, and people who have left are signed out.
 - **Deploy:** one Docker image plus Postgres (`docker-compose.prod.yml`) behind a TLS reverse proxy
@@ -30,9 +33,14 @@ make setup           # creates .env (DEV_LOGIN=true) and installs web deps
 make dev             # Postgres on :5433, API on :8080, Vite on :5173
 ```
 
-Run `make seed` once for sample firings. With `NOTIFICATIONS_DRY_RUN=true` (the default in `.env.example`), Discord and Slack messages are written to the server log instead of being sent; admins can also see them on `/admin`. With `DEV_LOGIN=true`, sign in as one of the seeded users (Kim the kiln master, Sam, Alice, Bob on BMS, Carol) by typing their name.
-The login page shows a form for signing in as any fake user and role, with no Discord or Slack app needed.
-To test real OAuth through Vite, set `APP_BASE_URL=http://localhost:5173` so the callbacks come back via the Vite proxy.
+Run `make seed` once for sample users, per-kiln firing profiles, and firings in various states. If the
+schema has changed, run `make db-reset` first — it drops the dev Postgres volume and recreates it. With
+`NOTIFICATIONS_DRY_RUN=true` (the default in `.env.example`), Discord and Slack messages are written to
+the server log instead of being sent; admins can also see them on `/admin`. With `DEV_LOGIN=true`, sign
+in as one of the seeded users (Kim the kiln master, Sam, Alice, Bob on BMS, Carol) by typing their name.
+The login page shows a form for signing in as any fake user and role, with no Discord or Slack app
+needed. To test real OAuth through Vite, set `APP_BASE_URL=http://localhost:5173` so the callbacks come
+back via the Vite proxy.
 
 ```bash
 make test        # Go unit + Postgres integration tests (uses kilnlab_test DB)
@@ -45,9 +53,9 @@ Dev Postgres listens on host port **5433**, so it can run alongside BookLab's on
 
 ### Scheduled jobs, public pages, settings
 
-- The server runs the §10 jobs itself every 5 minutes (and once at startup): requests closing at the cutoff, under-filled / needs-confirming DMs to kiln masters, missed-start and missed-unload reminders. Nothing external (cron) is needed.
+- The server runs the §10 jobs itself every 5 minutes (and once at startup): auto-cooling at the profile's firing end, requests closing at the cutoff, under-filled / needs-a-kiln-master DMs, day-of reminders, and missed-start / missed-unload reminders with escalation to all KMs + admins after a second grace period. Nothing external (cron) is needed.
 - `/upcoming` (the wheel QR) and `/calendar.ics` are public.
-- Admins edit studio settings and kilns on `/admin/settings`, and print the wheel and kiln QR codes from `/admin/qr`. Set `APP_BASE_URL` to the real address first, since the codes encode it.
+- Admins edit studio settings, kilns, and per-kiln firing profiles on `/admin/settings`, and print the wheel and kiln QR codes from `/admin/qr`. Set `APP_BASE_URL` to the real address first, since the codes encode it.
 
 ## Setting up Discord and Slack
 

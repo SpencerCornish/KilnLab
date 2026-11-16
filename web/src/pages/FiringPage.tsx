@@ -22,6 +22,7 @@ import type {
   FiringRequest,
   MutationResult,
   Options,
+  ProfileValues,
   RequestInput,
   TimestampField,
 } from '../lib/types'
@@ -33,6 +34,7 @@ type SheetKind =
   | { kind: 'edit'; request: FiringRequest }
   | { kind: 'decide'; request: FiringRequest; decision: 'approve' | 'decline' }
   | { kind: 'withdraw'; request: FiringRequest }
+  | { kind: 'unclaim' | 'takeover' | 'changeProfile' }
   | { kind: 'hold' | 'release' | 'reschedule' | 'cancel' | 'fullness' }
   | { kind: 'correct'; field: TimestampField }
 
@@ -90,7 +92,9 @@ export default function FiringPage() {
     setActionError(null)
   }
 
-  const kmControls = can.confirm || can.hold || can.release || can.reschedule || can.cancel || can.manage
+  const kmControls =
+    can.claim || can.unclaim || can.change_profile || can.hold || can.release || can.reschedule || can.cancel || can.manage
+  const canTakeOver = can.manage && !!f.managed_by && !can.unclaim
 
   return (
     <div className="space-y-5">
@@ -107,13 +111,19 @@ export default function FiringPage() {
         <p className="kc-caption kc-caption--body">
           <span className="capitalize">{f.firing_type}</span> · Cone {f.cone}
           {kilnLabel(options, f.kiln_id) && ` · ${kilnLabel(options, f.kiln_id)}`}
+          {` · about ${Math.round((f.firing_minutes / 60) * 10) / 10}h firing + ${Math.round((f.cooldown_minutes / 60) * 10) / 10}h cooldown`}
         </p>
+        {f.status !== 'completed' && f.status !== 'cancelled' && (
+          <p className={f.managed_by ? 'kc-data' : 'kc-warning'}>
+            {f.managed_by ? `Run by ${f.managed_by.name}` : 'Needs a kiln master'}
+          </p>
+        )}
         {f.started_at && (
           <p className="kc-data kc-muted">
             Started {formatWhen(f.started_at, tz)}
             {f.unloaded_at
               ? ` · unloaded ${formatWhen(f.unloaded_at, tz)}`
-              : f.estimated_unload_at && ` · est. unload ${formatWhen(f.estimated_unload_at, tz)}`}
+              : f.unloadable_at && ` · ready to unload ${formatWhen(f.unloadable_at, tz)}`}
           </p>
         )}
         {f.status === 'on_hold' && f.hold_reason && <p className="kc-warning">On hold: {f.hold_reason}</p>}
@@ -155,6 +165,16 @@ export default function FiringPage() {
       {(detail.can.next_steps.length > 0 || kmControls) && (
         <section className="space-y-4">
           <h2 className="kc-title kc-title--sm">Actions</h2>
+          {can.claim && (
+            <button disabled={busy} onClick={() => run(() => act.claim(f.id))} className="kc-key kc-key--block kc-key--fire kc-key--lg">
+              Take this firing
+            </button>
+          )}
+          {canTakeOver && (
+            <button onClick={() => setSheet({ kind: 'takeover' })} className="kc-key kc-key--block kc-key--go">
+              Take over from {f.managed_by?.name}
+            </button>
+          )}
           <LifecyclePanel
             detail={detail}
             options={options}
@@ -166,11 +186,8 @@ export default function FiringPage() {
           />
           {kmControls && (
             <div className="kc-keys kc-keys--grid">
-              {can.confirm && (
-                <button disabled={busy} onClick={() => run(() => act.confirm(f.id))} className="kc-key kc-key--go">
-                  Confirm firing
-                </button>
-              )}
+              {can.unclaim && <KmButton onClick={() => setSheet({ kind: 'unclaim' })}>Drop this firing</KmButton>}
+              {can.change_profile && <KmButton onClick={() => setSheet({ kind: 'changeProfile' })}>Change profile</KmButton>}
               {can.release && (
                 <button onClick={() => setSheet({ kind: 'release' })} className="kc-key kc-key--go">
                   Release hold
@@ -478,6 +495,42 @@ function ActionSheets({
         </ConfirmBody>
       )
       break
+    case 'unclaim':
+      title = 'Drop this firing?'
+      body = (
+        <ConfirmBody
+          busy={busy}
+          label="Drop this firing"
+          danger
+          onConfirm={() => run(() => act.unclaim(f.id))}
+        >
+          <p>It will go back to needing a kiln master. Other kiln masters will be told.</p>
+        </ConfirmBody>
+      )
+      break
+    case 'takeover':
+      title = `Take over from ${f.managed_by?.name}?`
+      body = (
+        <ConfirmBody
+          busy={busy}
+          label="Take over"
+          onConfirm={() => run(() => act.claim(f.id, true))}
+        >
+          <p>You will be the kiln master responsible for this firing.</p>
+        </ConfirmBody>
+      )
+      break
+    case 'changeProfile':
+      title = 'Change profile'
+      body = (
+        <ProfileForm
+          detail={detail}
+          options={options}
+          busy={busy}
+          onSubmit={(profileId, custom) => run(() => act.changeProfile(f.id, profileId, custom))}
+        />
+      )
+      break
     case 'decide': {
       const { request: r, decision } = sheet
       title = `${decision === 'approve' ? 'Approve' : 'Decline'} ${r.user.name}'s request`
@@ -686,12 +739,103 @@ function FullnessForm({ detail, busy, onSubmit }: { detail: FiringDetail; busy: 
   )
 }
 
+function ProfileForm({
+  detail,
+  options,
+  busy,
+  onSubmit,
+}: {
+  detail: FiringDetail
+  options: Options
+  busy: boolean
+  onSubmit: (profileId: number | null, custom: ProfileValues | null) => void
+}) {
+  const f = detail.firing
+  const kilnProfiles = options.profiles.filter((p) => p.kiln_id === f.kiln_id)
+  const current = kilnProfiles.find((p) => p.id === f.profile_id)
+  const [choice, setChoice] = useState(
+    current ? String(current.id) : kilnProfiles[0] ? String(kilnProfiles[0].id) : '__other',
+  )
+  const [name, setName] = useState(f.title)
+  const [type, setType] = useState(f.firing_type)
+  const [cone, setCone] = useState(f.cone)
+  const [hours, setHours] = useState(String(Math.round((f.firing_minutes / 60) * 100) / 100))
+  const [cooldownHours, setCooldownHours] = useState(String(Math.round((f.cooldown_minutes / 60) * 100) / 100))
+  const other = choice === '__other'
+
+  return (
+    <form
+      className="space-y-4"
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (!other) return onSubmit(Number(choice), null)
+        onSubmit(null, {
+          name,
+          firing_type: type,
+          cone,
+          firing_minutes: Math.round(Number(hours) * 60),
+          cooldown_minutes: Math.round(Number(cooldownHours) * 60),
+        })
+      }}
+    >
+      <Field label="Firing profile" hint={<span className="kc-caption kc-caption--body block">Only profiles for this kiln are shown.</span>}>
+        <span className="kc-select-wrap">
+          <select value={choice} onChange={(e) => setChoice(e.target.value)} className="kc-select">
+            {kilnProfiles.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+            <option value="__other">Other / custom…</option>
+          </select>
+        </span>
+      </Field>
+
+      {other && (
+        <>
+          <Field label="Firing name">
+            <input required maxLength={120} value={name} onChange={(e) => setName(e.target.value)} className={inputClass} />
+          </Field>
+          <Field label="Type">
+            <span className="kc-select-wrap">
+              <select value={type} onChange={(e) => setType(e.target.value)} className="kc-select capitalize">
+                {options.firing_types.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+            </span>
+          </Field>
+          <ConeSelect value={cone} onChange={setCone} cones={options.cones} />
+          <Field label="Firing time (hours)">
+            <input required type="number" min={0.01} max={168} step={0.25} value={hours} onChange={(e) => setHours(e.target.value)} className={inputClass} />
+          </Field>
+          <Field label="Cooldown time (hours)">
+            <input required type="number" min={0} max={168} step={0.25} value={cooldownHours} onChange={(e) => setCooldownHours(e.target.value)} className={inputClass} />
+          </Field>
+        </>
+      )}
+
+      <button type="submit" disabled={busy} className="kc-key kc-key--block kc-key--fire">
+        {busy ? 'Saving…' : 'Change profile'}
+      </button>
+    </form>
+  )
+}
+
 // ── Timeline ────────────────────────────────────────────────────────────────
 
 function describe(e: FiringEvent): string {
   switch (e.type) {
     case 'created':
       return 'Proposed the firing'
+    case 'claimed':
+      return 'Took this firing'
+    case 'unclaimed':
+      return 'Dropped responsibility'
+    case 'profile_changed':
+      return 'Changed the firing profile'
     case 'status_change':
       return `${e.from_status ? STATUS_LABELS[e.from_status] : '?'} → ${e.to_status ? STATUS_LABELS[e.to_status] : '?'}`
     case 'requests_closed':
@@ -703,21 +847,18 @@ function describe(e: FiringEvent): string {
   }
 }
 
-/** Collapsed audit trail: program, recorded times (fixable by kiln masters), and events. */
+/** Collapsed audit trail: profile, recorded times (fixable by kiln masters), and events. */
 function History({ detail, tz, onCorrect }: { detail: FiringDetail; tz: string; onCorrect: (field: TimestampField) => void }) {
   const f = detail.firing
   const rows = TIME_ROWS.filter((r) => f[r.field])
-  if (detail.events.length === 0 && !f.program && rows.length === 0) return null
   return (
     <details>
       <summary className="kc-title kc-title--sm cursor-pointer">History</summary>
       <div className="mt-4 space-y-4">
-        {f.program && (
-          <p className="kc-data">
-            Program: {f.program}
-            {f.estimated_duration_minutes && ` · about ${Math.round((f.estimated_duration_minutes / 60) * 10) / 10}h`}
-          </p>
-        )}
+        <p className="kc-data">
+          Profile: {f.title} · about {Math.round((f.firing_minutes / 60) * 10) / 10}h firing +{' '}
+          {Math.round((f.cooldown_minutes / 60) * 10) / 10}h cooldown
+        </p>
         {rows.length > 0 && (
           <div>
             {rows.map((r) => (

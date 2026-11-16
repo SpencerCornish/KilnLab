@@ -10,7 +10,7 @@ import { useLoad } from '../lib/useLoad'
 // Public wording (§9A): "on hold" reads as "waiting for more work" to visitors.
 const PUBLIC_LABELS: Partial<Record<FiringStatus, string>> = { on_hold: 'Waiting for more work' }
 
-const IN_KILN = new Set<FiringStatus>(['loading', 'loaded', 'firing', 'cooling'])
+const IN_KILN = new Set<FiringStatus>(['firing', 'cooling'])
 
 /** The wheel-QR page: no login needed. Refreshes itself every minute. */
 export default function UpcomingPage() {
@@ -80,7 +80,7 @@ function PublicFiringCard({ firing: f, tz }: { firing: PublicFiring; tz: string 
         {inKiln ? (
           <>
             <p className="kc-data">In the kiln now</p>
-            {f.estimated_unload_at && <p className="kc-data kc-muted">Est. unload {formatWhen(f.estimated_unload_at, tz)}</p>}
+            {f.unloadable_at && <p className="kc-data kc-muted">Ready to unload {formatWhen(f.unloadable_at, tz)}</p>}
           </>
         ) : (
           <>

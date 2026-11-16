@@ -49,8 +49,12 @@ func TestScheduledJobs(t *testing.T) {
 	dayRef := e.now.Add(72 * time.Hour) // a time on the firing's day
 	dayStartAt := firing.DayStart(firing.DayOf(dayRef, studioLoc), studioLoc)
 	cutoffAt := dayStartAt.Add(-12 * time.Hour) // the default request cutoff
-	d := alice.mustDo("POST", "/api/firings", map[string]any{"firing_type": "glaze", "cone": "6",
-		"scheduled_date": dayOf(dayRef), "description": "mugs", "share_pct": 30}, http.StatusCreated)
+	// A short firing so the test can reach auto-cooling and a missed unload.
+	body := firingBody("glaze", "6", dayOf(dayRef), "mugs", 30)
+	custom := body["custom"].(map[string]any)
+	custom["firing_minutes"] = 60
+	custom["cooldown_minutes"] = 0
+	d := alice.mustDo("POST", "/api/firings", body, http.StatusCreated)
 	base := fmt.Sprintf("/api/firings/%d", int64(jget(d, "firing", "id").(float64)))
 	drainOutbox(t, pool)
 	tick(0)
@@ -61,7 +65,7 @@ func TestScheduledJobs(t *testing.T) {
 	if got := dmRecipients(rows); !slices.Equal(got, []int64{kimID}) {
 		t.Fatalf("under-filled DMs = %v", got)
 	}
-	if txt := dmText(rows); !strings.Contains(txt, "only 30% full") || !strings.Contains(txt, "not confirmed") {
+	if txt := dmText(rows); !strings.Contains(txt, "only 30% full") || !strings.Contains(txt, "no one has taken it") {
 		t.Fatalf("under-filled text = %q", txt)
 	}
 	if len(rows) != 3 { // + main message on both platforms ("Requests closed")
@@ -69,15 +73,15 @@ func TestScheduledJobs(t *testing.T) {
 	}
 	tick(0) // exactly once
 
-	// Confirm and reopen requests until the start: re-armed.
-	km.mustDo("POST", base+"/confirm", nil, http.StatusOK)
+	// Take the firing and reopen requests until the start: re-armed.
+	km.mustDo("POST", base+"/claim", nil, http.StatusOK)
 	km.mustDo("PUT", base+"/requests-window", map[string]any{"closed": false}, http.StatusOK)
 	drainOutbox(t, pool)
 	tick(0)
 
 	// Start passes: requests close again (still under-filled); missed start waits for the 2h grace.
 	e.advance(dayStartAt.Add(time.Minute).Sub(e.now))
-	if txt := dmText(tick(1)); !strings.Contains(txt, "only 30% full") || strings.Contains(txt, "not confirmed") {
+	if txt := dmText(tick(1)); !strings.Contains(txt, "only 30% full") || strings.Contains(txt, "no one has taken it") {
 		t.Fatalf("second close text = %q", txt)
 	}
 	// A start is missed only once its day has ended, plus the 2h grace.
@@ -94,13 +98,13 @@ func TestScheduledJobs(t *testing.T) {
 	}
 	tick(0)
 
-	// Started with a 1h program; unload overdue after est. + 3h grace → kiln masters.
-	km.mustDo("POST", base+"/status", map[string]any{"to": "firing", "program": "Fast", "estimated_duration_minutes": 60}, http.StatusOK)
+	// Start with a 1h firing + no cooldown; auto-cooling and then a missed unload.
+	km.mustDo("POST", base+"/status", map[string]any{"to": "firing"}, http.StatusOK)
 	drainOutbox(t, pool)
-	e.advance(4 * time.Hour)
-	tick(0)
-	e.advance(2 * time.Minute)
-	rows = tick(1)
+	e.advance(2 * time.Hour)
+	tick(1) // auto-cooling card refresh
+	e.advance(2*time.Hour + 2*time.Minute)
+	rows = tick(1) // unload overdue after est. + 3h grace
 	if got := dmRecipients(rows); !slices.Equal(got, []int64{kimID}) {
 		t.Fatalf("missed unload DMs = %v", got)
 	}
@@ -147,8 +151,7 @@ func TestDayOfReminder(t *testing.T) {
 	}
 
 	dayRef := e.now.Add(72 * time.Hour)
-	d := alice.mustDo("POST", "/api/firings", map[string]any{"firing_type": "glaze", "cone": "6",
-		"scheduled_date": dayOf(dayRef), "description": "mugs", "share_pct": 30}, http.StatusCreated)
+	d := alice.mustDo("POST", "/api/firings", firingBody("glaze", "6", dayOf(dayRef), "mugs", 30), http.StatusCreated)
 	base := fmt.Sprintf("/api/firings/%d", int64(jget(d, "firing", "id").(float64)))
 	drainOutbox(t, pool)
 
@@ -189,12 +192,40 @@ func TestDayOfReminder(t *testing.T) {
 	}
 }
 
+// The profile's firing time auto-cools the firing; anyone can then unload it early.
+func TestAutoCoolingAndEarlyUnload(t *testing.T) {
+	e, pool := newFiringEnvPool(t, func(c *config.Config) { c.NotificationsDryRun = true })
+	km := e.login("Kim", true)
+	sam := e.login("Sam", false)
+	body := firingBody("glaze", "6", dayOf(e.now.Add(72*time.Hour)), "mugs", 40)
+	custom := body["custom"].(map[string]any)
+	custom["firing_minutes"] = 60
+	custom["cooldown_minutes"] = 0
+	d := km.mustDo("POST", "/api/firings", body, http.StatusCreated)
+	base := fmt.Sprintf("/api/firings/%d", int64(jget(d, "firing", "id").(float64)))
+	km.mustDo("POST", base+"/claim", nil, http.StatusOK)
+	km.mustDo("POST", base+"/status", map[string]any{"to": "firing"}, http.StatusOK)
+	drainOutbox(t, pool)
+
+	runner := jobs.NewRunner(pool, NotifyConfig(&config.Config{NotificationsDryRun: true}), nil,
+		slog.New(slog.DiscardHandler))
+	runner.Now = func() time.Time { e.mu.Lock(); defer e.mu.Unlock(); return e.now }
+	e.advance(61 * time.Minute)
+	if n, err := runner.Tick(context.Background()); err != nil || n != 1 {
+		t.Fatalf("auto cooling tick: acted %d, %v", n, err)
+	}
+	d = sam.mustDo("GET", base, nil, http.StatusOK)
+	if jget(d, "firing", "status") != "cooling" || jget(d, "firing", "ready_to_unload") != true {
+		t.Fatalf("after auto cooling = %v", d["firing"])
+	}
+	sam.mustDo("POST", base+"/status", map[string]any{"to": "completed"}, http.StatusOK)
+}
+
 // A firing a kiln master schedules inside the cutoff closes quietly.
 func TestJobsShortNoticeFiring(t *testing.T) {
 	e, pool := newFiringEnvPool(t, func(c *config.Config) { c.NotificationsDryRun = true })
 	km := e.login("Kim", true)
-	km.mustDo("POST", "/api/firings", map[string]any{"firing_type": "bisque", "cone": "04",
-		"scheduled_date": dayOf(e.now.Add(3 * time.Hour)), "description": "tiles", "share_pct": 10}, http.StatusCreated)
+	km.mustDo("POST", "/api/firings", firingBody("bisque", "04", dayOf(e.now.Add(3*time.Hour)), "tiles", 10), http.StatusCreated)
 	drainOutbox(t, pool)
 	runner := jobs.NewRunner(pool, NotifyConfig(&config.Config{NotificationsDryRun: true}), nil, slog.New(slog.DiscardHandler))
 	runner.Now = func() time.Time { return e.now.Add(time.Minute) }

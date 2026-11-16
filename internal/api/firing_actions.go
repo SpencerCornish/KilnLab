@@ -2,9 +2,12 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/spencercornish/kilnlab/internal/db"
 	"github.com/spencercornish/kilnlab/internal/firing"
@@ -55,6 +58,24 @@ func (s *Server) mutateFiring(w http.ResponseWriter, r *http.Request, fn mutateF
 		warnings = []string{}
 	}
 	writeJSON(w, http.StatusOK, mutationResponse{d, warnings})
+}
+
+// responsibleKMs returns the DMs a kiln-master alert should reach: the owner
+// if someone has taken the firing and is still a KM, otherwise every KM.
+func (s *Server) responsibleKMs(ctx context.Context, q *db.Queries, f db.Firing) ([]int64, string, error) {
+	if f.ManagedByUserID != nil {
+		if ok, err := q.UserIsKilnMaster(ctx, *f.ManagedByUserID); err != nil {
+			return nil, "", err
+		} else if ok {
+			name, err := q.GetUserName(ctx, *f.ManagedByUserID)
+			if err != nil {
+				return nil, "", err
+			}
+			return []int64{*f.ManagedByUserID}, name, nil
+		}
+	}
+	ids, err := q.ListKilnMasterIDs(ctx)
+	return ids, "", err
 }
 
 // ── Requests ────────────────────────────────────────────────────────────────
@@ -152,8 +173,8 @@ func (s *Server) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 		if err := s.logEvent(ctx, q, f, u, firing.EventRequestSubmitted, nil, nil, &note); err != nil {
 			return nil, err
 		}
-		// Tell each kiln master someone asked to join (open question 3: alert all).
-		kms, err := q.ListKilnMasterIDs(ctx)
+		// Tell the owner (or every KM while unclaimed) someone asked to join.
+		kms, _, err := s.responsibleKMs(ctx, q, f)
 		if err != nil {
 			return nil, err
 		}
@@ -324,43 +345,181 @@ func (s *Server) handleDecideRequest(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ── Kiln master actions ─────────────────────────────────────────────────────
+// ── Ownership & profiles ────────────────────────────────────────────────────
 
 func actorFor(u *currentUser) firing.Actor {
 	return firing.Actor{Roles: u.Roles}
 }
 
 func stateOf(f db.Firing) firing.State {
-	return firing.State{Status: f.Status, WasConfirmed: f.WasConfirmed}
+	return firing.State{Status: f.Status, WasScheduled: f.WasScheduled}
 }
+
+func canChangeProfile(status db.FiringStatus) bool {
+	return status == firing.Proposed || status == firing.OnHold || status == firing.Scheduled
+}
+
+type claimInput struct {
+	Takeover bool `json:"takeover"`
+}
+
+func (s *Server) handleClaim(w http.ResponseWriter, r *http.Request) {
+	var in claimInput
+	if !s.readOptionalJSON(w, r, &in) {
+		return
+	}
+	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser, n *notify.Batch) ([]string, error) {
+		if !u.Roles.CanManageFirings() {
+			return nil, forbidden("only kiln masters can take a firing")
+		}
+		to, err := firing.Claim(stateOf(f), actorFor(u))
+		if err != nil {
+			return nil, err
+		}
+		note := fmt.Sprintf("%s took this firing", u.DisplayName)
+		var updated db.Firing
+		if f.ManagedByUserID != nil {
+			if !in.Takeover {
+				name, _ := q.GetUserName(ctx, *f.ManagedByUserID)
+				return nil, conflict("%s is already running this firing", name)
+			}
+			previous := *f.ManagedByUserID
+			updated, err = q.ReassignFiring(ctx, db.ReassignFiringParams{ID: f.ID, UserID: &u.ID})
+			if err != nil {
+				return nil, err
+			}
+			note = fmt.Sprintf("%s took over this firing", u.DisplayName)
+			url := notify.FiringURL(s.cfg.AppBaseURL, f.ID)
+			n.DM([]int64{previous}, notify.DMTakenOver(f, s.studioLocation(ctx, q), u.DisplayName, url))
+		} else {
+			updated, err = q.ClaimFiring(ctx, db.ClaimFiringParams{ID: f.ID, UserID: &u.ID})
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, conflict("another kiln master just took this firing")
+			}
+			if err != nil {
+				return nil, err
+			}
+		}
+		from, target := f.Status, to
+		if updated.Status != f.Status {
+			target = updated.Status
+		}
+		if err := s.logEvent(ctx, q, updated, u, firing.EventClaimed, &from, &target, &note); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	})
+}
+
+func (s *Server) handleUnclaim(w http.ResponseWriter, r *http.Request) {
+	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser, n *notify.Batch) ([]string, error) {
+		if f.ManagedByUserID == nil {
+			return nil, conflict("no one has taken this firing")
+		}
+		if !u.Roles.CanEditSettings() && *f.ManagedByUserID != u.ID {
+			return nil, forbidden("only the kiln master running this firing can drop it")
+		}
+		to, err := firing.Unclaim(stateOf(f))
+		if err != nil {
+			return nil, err
+		}
+		updated, err := q.UnclaimFiring(ctx, f.ID)
+		if err != nil {
+			return nil, err
+		}
+		from := f.Status
+		note := fmt.Sprintf("%s dropped responsibility", u.DisplayName)
+		if err := s.logEvent(ctx, q, updated, u, firing.EventUnclaimed, &from, &to, &note); err != nil {
+			return nil, err
+		}
+		kms, err := q.ListKilnMasterIDs(ctx)
+		if err != nil {
+			return nil, err
+		}
+		n.DM(kms, notify.AlertUnclaimed(f, s.studioLocation(ctx, q), u.DisplayName,
+			notify.FiringURL(s.cfg.AppBaseURL, f.ID)))
+		return nil, nil
+	})
+}
+
+type profileChangeInput struct {
+	ProfileID *int64         `json:"profile_id"`
+	Custom    *profileValues `json:"custom"`
+}
+
+func (s *Server) handleChangeProfile(w http.ResponseWriter, r *http.Request) {
+	var in profileChangeInput
+	if !s.readJSON(w, r, &in) {
+		return
+	}
+	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser, n *notify.Batch) ([]string, error) {
+		if !u.Roles.CanEditSettings() && (f.ManagedByUserID == nil || *f.ManagedByUserID != u.ID) {
+			return nil, forbidden("only the kiln master running this firing can change its profile")
+		}
+		if !canChangeProfile(f.Status) {
+			return nil, conflict("the profile can't change once the kiln has started")
+		}
+		snap, err := s.resolveProfile(ctx, q, f.KilnID, in.ProfileID, in.Custom)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := q.SetFiringProfile(ctx, db.SetFiringProfileParams{
+			ID: f.ID, ProfileID: snap.ProfileID, Title: snap.Title, FiringType: snap.FiringType,
+			Cone: snap.Cone, FiringMinutes: snap.FiringMinutes, CooldownMinutes: snap.CooldownMinutes,
+		}); err != nil {
+			return nil, err
+		}
+		var warnings []string
+		rows, err := q.ListRequestsForFiring(ctx, f.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			rq := row.FiringRequest
+			if rq.Status == db.RequestStatusWithdrawn {
+				continue
+			}
+			c := firing.Compatibility(snap.FiringType, snap.Cone, rq.Cone, rq.Glazed)
+			var warning *string
+			if c != "" {
+				warning = &c
+			}
+			if err := q.UpdateRequestCompatibility(ctx, db.UpdateRequestCompatibilityParams{
+				ID: rq.ID, CompatibilityWarning: warning,
+			}); err != nil {
+				return nil, err
+			}
+			if warning != nil && (rq.Status == db.RequestStatusPending || rq.Status == db.RequestStatusApproved) {
+				warnings = append(warnings, fmt.Sprintf("%s's request may not fit: %s", row.UserName, c))
+			}
+		}
+		note := fmt.Sprintf("Changed profile to %s (%s, cone %s, %s firing + %s cooldown)",
+			snap.Title, snap.FiringType, snap.Cone, formatDuration(snap.FiringMinutes), formatDuration(snap.CooldownMinutes))
+		if err := s.logEvent(ctx, q, f, u, firing.EventProfileChanged, nil, nil, &note); err != nil {
+			return nil, err
+		}
+		return warnings, nil
+	})
+}
+
+// ── Kiln master actions ─────────────────────────────────────────────────────
 
 // changeStatus applies a state machine result and writes the event.
 func (s *Server) changeStatus(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser, to db.FiringStatus, holdReason, cancelReason, note *string) (db.Firing, error) {
-	wasConfirmed := f.WasConfirmed
+	wasScheduled := f.WasScheduled
 	if to == firing.OnHold {
-		wasConfirmed = f.Status == firing.Confirmed
+		wasScheduled = f.Status == firing.Scheduled
 	}
 	if to != firing.OnHold {
 		holdReason = nil
 	}
 	updated, err := q.SetFiringStatus(ctx, db.SetFiringStatusParams{
-		ID: f.ID, Status: to, WasConfirmed: wasConfirmed, HoldReason: holdReason, CancelReason: cancelReason,
+		ID: f.ID, Status: to, WasScheduled: wasScheduled, HoldReason: holdReason, CancelReason: cancelReason,
 	})
 	if err != nil {
 		return updated, err
 	}
 	return updated, s.logEvent(ctx, q, f, u, firing.EventStatusChange, &f.Status, &to, note)
-}
-
-func (s *Server) handleConfirm(w http.ResponseWriter, r *http.Request) {
-	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser, n *notify.Batch) ([]string, error) {
-		to, err := firing.Confirm(stateOf(f), actorFor(u))
-		if err != nil {
-			return nil, err
-		}
-		_, err = s.changeStatus(ctx, q, f, u, to, nil, nil, nil)
-		return nil, err
-	})
 }
 
 type reasonInput struct {
@@ -445,7 +604,7 @@ func (s *Server) reschedule(ctx context.Context, q *db.Queries, f db.Firing, u *
 	return s.dmParticipants(ctx, q, f, n, notify.DMRescheduled(f, day, notify.FiringURL(s.cfg.AppBaseURL, f.ID)))
 }
 
-// handleRelease: on_hold → proposed/confirmed, optionally with a new start.
+// handleRelease: on_hold → proposed/scheduled, optionally with a new day.
 func (s *Server) handleRelease(w http.ResponseWriter, r *http.Request) {
 	var in rescheduleInput
 	if !s.readJSON(w, r, &in) {

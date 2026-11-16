@@ -14,7 +14,7 @@ func TestRequestsWindow(t *testing.T) {
 	}
 	before, after := closeAt.Add(-time.Minute), closeAt
 	for _, s := range AllStatuses {
-		open := s == Proposed || s == OnHold || s == Confirmed
+		open := s == Proposed || s == OnHold || s == Scheduled
 		if got := RequestsOpen(Window{Status: s, CloseAt: closeAt}, before); got != open {
 			t.Errorf("%s before cutoff: open = %v", s, got)
 		}

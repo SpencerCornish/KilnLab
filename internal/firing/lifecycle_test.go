@@ -14,27 +14,22 @@ func TestNextSteps(t *testing.T) {
 		a    Actor
 		want []Status
 	}{
-		{"KM confirmed: load or start", Confirmed, kilnMaster, []Status{Loading, Firing}},
-		{"KM loading: loaded or start", Loading, kilnMaster, []Status{Loaded, Firing}},
-		{"KM loaded: start", Loaded, kilnMaster, []Status{Firing}},
-		{"KM firing", Firing, kilnMaster, []Status{Cooling}},
-		{"KM cooling", Cooling, kilnMaster, []Status{Completed}},
+		{"KM scheduled: start", Scheduled, kilnMaster, []Status{Firing}},
+		{"admin scheduled: start", Scheduled, admin, []Status{Firing}},
+		{"member scheduled: blocked", Scheduled, member, nil},
+		{"KM firing: unload", Firing, kilnMaster, []Status{Completed}},
+		{"member firing: unload", Firing, member, []Status{Completed}},
+		{"KM cooling: unload", Cooling, kilnMaster, []Status{Completed}},
+		{"member cooling: unload", Cooling, member, []Status{Completed}},
 		{"KM completed", Completed, kilnMaster, nil},
-		{"KM proposed (confirm first)", Proposed, kilnMaster, nil},
-		{"admin loaded", Loaded, admin, []Status{Firing}},
-		{"member confirmed", Confirmed, member, []Status{Loading}},
-		{"member loading", Loading, member, []Status{Loaded}},
-		{"member loaded", Loaded, member, nil},
-		{"member firing: skip cooling", Firing, member, []Status{Completed}},
-		{"member cooling", Cooling, member, []Status{Completed}},
-		{"member completed", Completed, member, nil},
+		{"KM proposed (take first)", Proposed, kilnMaster, nil},
+		{"KM on hold (release first)", OnHold, kilnMaster, nil},
 	}
 	for _, c := range cases {
 		got := NextSteps(State{Status: c.from}, c.a)
 		if !slices.Equal(got, c.want) {
 			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
 		}
-		// Every offered step must actually be allowed.
 		for _, to := range got {
 			if err := Advance(State{Status: c.from}, to, c.a); err != nil {
 				t.Errorf("%s: offered %s but Advance says %v", c.name, to, err)
@@ -44,16 +39,13 @@ func TestNextSteps(t *testing.T) {
 }
 
 func TestBlockedReason(t *testing.T) {
-	if r := BlockedReason(State{Status: Loaded}, member); r != "Only kiln masters can start the kiln." {
-		t.Errorf("member at loaded: %q", r)
+	if r := BlockedReason(State{Status: Scheduled}, member); r != "Only kiln masters can start the kiln." {
+		t.Errorf("member at scheduled: %q", r)
 	}
-	if r := BlockedReason(State{Status: Confirmed}, member); r != "" {
-		t.Errorf("member can load a confirmed firing, got reason %q", r)
-	}
-	if r := BlockedReason(State{Status: Confirmed}, kilnMaster); r != "" {
+	if r := BlockedReason(State{Status: Scheduled}, kilnMaster); r != "" {
 		t.Errorf("KM has actions, got %q", r)
 	}
-	for _, s := range []Status{Completed, Cancelled, Proposed} {
+	for _, s := range []Status{Completed, Cancelled, Proposed, OnHold} {
 		if r := BlockedReason(State{Status: s}, member); r != "" {
 			t.Errorf("%s: %q", s, r)
 		}
@@ -64,23 +56,27 @@ func TestRelevantAtKiln(t *testing.T) {
 	now := t0
 	for _, s := range AllStatuses {
 		got := RelevantAtKiln(s, now.Add(72*time.Hour), now)
-		want := slices.Contains([]Status{Loading, Loaded, Firing, Cooling}, s)
+		want := slices.Contains([]Status{Firing, Cooling}, s)
 		if got != want {
 			t.Errorf("%s far from start: %v", s, got)
 		}
 	}
-	for _, d := range []time.Duration{-24 * time.Hour, -time.Hour, 0, 23 * time.Hour, 24 * time.Hour} {
-		if !RelevantAtKiln(Confirmed, now.Add(d), now) {
-			t.Errorf("confirmed at %v should be relevant", d)
+	for _, s := range []Status{Proposed, OnHold, Scheduled} {
+		for _, d := range []time.Duration{-24 * time.Hour, -time.Hour, 0, 23 * time.Hour, 24 * time.Hour} {
+			if !RelevantAtKiln(s, now.Add(d), now) {
+				t.Errorf("%s at %v should be relevant", s, d)
+			}
+		}
+		for _, d := range []time.Duration{-25 * time.Hour, 25 * time.Hour} {
+			if RelevantAtKiln(s, now.Add(d), now) {
+				t.Errorf("%s at %v should not be relevant", s, d)
+			}
 		}
 	}
-	for _, d := range []time.Duration{-25 * time.Hour, 25 * time.Hour} {
-		if RelevantAtKiln(Confirmed, now.Add(d), now) {
-			t.Errorf("confirmed at %v should not be relevant", d)
+	for _, s := range []Status{Completed, Cancelled} {
+		if RelevantAtKiln(s, now, now) {
+			t.Errorf("%s should not be relevant at the kiln", s)
 		}
-	}
-	if RelevantAtKiln(Proposed, now, now) {
-		t.Error("proposed firings aren't relevant at the kiln")
 	}
 }
 
@@ -108,12 +104,12 @@ func TestTimestampsOrder(t *testing.T) {
 	if err := ok.With("cooling_at", *at(-1)).CheckOrder(); err == nil || err.Error() != "cooling can't be before started" {
 		t.Errorf("cooling before start: %v", err)
 	}
-	// Gaps (skipped statuses) are fine.
-	if err := (Timestamps{StartedAt: at(0), ReadyForPickupAt: at(30)}).CheckOrder(); err != nil {
+	// Gaps (skipped cooling) are fine.
+	if err := (Timestamps{StartedAt: at(0), UnloadedAt: at(30)}).CheckOrder(); err != nil {
 		t.Error(err)
 	}
-	if err := (Timestamps{StartedAt: at(5), ReadyForPickupAt: at(3)}).CheckOrder(); err == nil {
-		t.Error("ready before started should fail")
+	if err := (Timestamps{StartedAt: at(5), UnloadedAt: at(3)}).CheckOrder(); err == nil {
+		t.Error("unloaded before started should fail")
 	}
 	if (Timestamps{}).Latest() != nil {
 		t.Error("empty latest should be nil")
@@ -141,8 +137,21 @@ func TestCheckOccurredAt(t *testing.T) {
 	}
 }
 
-func TestEstimatedUnload(t *testing.T) {
-	if got := EstimatedUnload(t0, 600); !got.Equal(t0.Add(10 * time.Hour)) {
-		t.Errorf("got %v", got)
+func TestPlannedTimingsAndReady(t *testing.T) {
+	firingEnds, unloadable := PlannedTimings(t0, 600, 300)
+	if !firingEnds.Equal(t0.Add(10 * time.Hour)) {
+		t.Errorf("firing ends = %v", firingEnds)
+	}
+	if !unloadable.Equal(t0.Add(15 * time.Hour)) {
+		t.Errorf("unloadable = %v", unloadable)
+	}
+	if ReadyToUnload(Scheduled, &unloadable, unloadable) {
+		t.Error("scheduled firing should not be ready to unload")
+	}
+	if !ReadyToUnload(Cooling, &unloadable, unloadable) {
+		t.Error("cooling firing should be ready at the estimate")
+	}
+	if ReadyToUnload(Cooling, &unloadable, unloadable.Add(-time.Minute)) {
+		t.Error("cooling firing should not be ready before the estimate")
 	}
 }

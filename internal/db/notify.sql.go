@@ -37,17 +37,6 @@ func (q *Queries) ClaimDueOutbox(ctx context.Context, now time.Time) (Notificati
 	return i, err
 }
 
-const countApprovedRequests = `-- name: CountApprovedRequests :one
-SELECT count(*)::int FROM firing_requests WHERE firing_id = $1 AND status = 'approved'
-`
-
-func (q *Queries) CountApprovedRequests(ctx context.Context, firingID int64) (int32, error) {
-	row := q.db.QueryRow(ctx, countApprovedRequests, firingID)
-	var column_1 int32
-	err := row.Scan(&column_1)
-	return column_1, err
-}
-
 const enqueueOutbox = `-- name: EnqueueOutbox :exec
 
 INSERT INTO notification_outbox (kind, platform, payload) VALUES ($1, $2, $3)
@@ -92,11 +81,41 @@ func (q *Queries) GetNotificationMessage(ctx context.Context, arg GetNotificatio
 	return i, err
 }
 
+const listEscalationIDs = `-- name: ListEscalationIDs :many
+SELECT DISTINCT user_id FROM (
+    SELECT a.user_id FROM accounts a WHERE a.is_kiln_master
+    UNION
+    SELECT u.id AS user_id FROM users u WHERE u.is_admin
+) ids
+ORDER BY user_id
+`
+
+// Missed start/unload escalations reach every kiln master and admin.
+func (q *Queries) ListEscalationIDs(ctx context.Context) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listEscalationIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []int64
+	for rows.Next() {
+		var user_id int64
+		if err := rows.Scan(&user_id); err != nil {
+			return nil, err
+		}
+		items = append(items, user_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listKilnMasterIDs = `-- name: ListKilnMasterIDs :many
 SELECT DISTINCT a.user_id FROM accounts a WHERE a.is_kiln_master
 `
 
-// Kiln-master alerts go to everyone with the Discord role (open question 3: no "on duty" rota).
+// Kiln-master alerts go to everyone with the Discord role.
 func (q *Queries) ListKilnMasterIDs(ctx context.Context) ([]int64, error) {
 	rows, err := q.db.Query(ctx, listKilnMasterIDs)
 	if err != nil {

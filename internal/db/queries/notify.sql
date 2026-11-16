@@ -51,8 +51,14 @@ SELECT r.user_id FROM firing_requests r
 WHERE r.firing_id = sqlc.arg(firing_id) AND r.status::text = ANY (sqlc.arg(statuses)::text[]);
 
 -- name: ListKilnMasterIDs :many
--- Kiln-master alerts go to everyone with the Discord role (open question 3: no "on duty" rota).
+-- Kiln-master alerts go to everyone with the Discord role.
 SELECT DISTINCT a.user_id FROM accounts a WHERE a.is_kiln_master;
 
--- name: CountApprovedRequests :one
-SELECT count(*)::int FROM firing_requests WHERE firing_id = $1 AND status = 'approved';
+-- name: ListEscalationIDs :many
+-- Missed start/unload escalations reach every kiln master and admin.
+SELECT DISTINCT user_id FROM (
+    SELECT a.user_id FROM accounts a WHERE a.is_kiln_master
+    UNION
+    SELECT u.id AS user_id FROM users u WHERE u.is_admin
+) ids
+ORDER BY user_id;

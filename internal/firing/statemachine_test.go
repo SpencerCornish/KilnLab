@@ -9,10 +9,59 @@ import (
 )
 
 var (
-	member     = Actor{} // anyone signed in: can say they've loaded or unloaded
+	member     = Actor{} // anyone signed in; can unload work
 	kilnMaster = Actor{Roles: policy.Roles{KilnMaster: true}}
 	admin      = Actor{Roles: policy.Roles{Admin: true}}
 )
+
+func TestClaim(t *testing.T) {
+	allowed := map[Status]Status{
+		Proposed:  Scheduled,
+		Scheduled: Scheduled,
+		OnHold:    OnHold,
+		Firing:    Firing,
+		Cooling:   Cooling,
+	}
+	for _, from := range AllStatuses {
+		for _, a := range []Actor{member, kilnMaster, admin} {
+			got, err := Claim(State{Status: from}, a)
+			want, ok := allowed[from]
+			switch {
+			case !a.Roles.CanManageFirings():
+				if !errors.Is(err, ErrForbidden) {
+					t.Errorf("claim from %s by %+v: err = %v, want forbidden", from, a, err)
+				}
+			case !ok:
+				if !errors.Is(err, ErrInvalidTransition) {
+					t.Errorf("claim from %s: err = %v, want invalid", from, err)
+				}
+			case err != nil || got != want:
+				t.Errorf("claim from %s = %s, %v; want %s", from, got, err, want)
+			}
+		}
+	}
+}
+
+func TestUnclaim(t *testing.T) {
+	allowed := map[Status]Status{
+		Proposed:  Proposed,
+		Scheduled: Proposed,
+		OnHold:    OnHold,
+	}
+	for _, from := range AllStatuses {
+		got, err := Unclaim(State{Status: from})
+		want, ok := allowed[from]
+		if !ok {
+			if !errors.Is(err, ErrInvalidTransition) {
+				t.Errorf("unclaim from %s: err = %v, want invalid", from, err)
+			}
+			continue
+		}
+		if err != nil || got != want {
+			t.Errorf("unclaim from %s = %s, %v; want %s", from, got, err, want)
+		}
+	}
+}
 
 func TestManagementActions(t *testing.T) {
 	type action func(State, Actor) (Status, error)
@@ -20,12 +69,9 @@ func TestManagementActions(t *testing.T) {
 		fn      action
 		allowed map[Status]Status // from → to
 	}{
-		"confirm": {Confirm, map[Status]Status{Proposed: Confirmed}},
-		"hold":    {Hold, map[Status]Status{Proposed: OnHold, Confirmed: OnHold}},
+		"hold":    {Hold, map[Status]Status{Proposed: OnHold, Scheduled: OnHold}},
 		"release": {Release, map[Status]Status{OnHold: Proposed}},
-		"cancel": {Cancel, map[Status]Status{
-			Proposed: Cancelled, OnHold: Cancelled, Confirmed: Cancelled, Loading: Cancelled, Loaded: Cancelled,
-		}},
+		"cancel":  {Cancel, map[Status]Status{Proposed: Cancelled, OnHold: Cancelled, Scheduled: Cancelled}},
 	}
 	for name, act := range actions {
 		for _, from := range AllStatuses {
@@ -49,17 +95,17 @@ func TestManagementActions(t *testing.T) {
 	}
 }
 
-func TestReleaseReturnsToConfirmed(t *testing.T) {
-	got, err := Release(State{Status: OnHold, WasConfirmed: true}, kilnMaster)
-	if err != nil || got != Confirmed {
-		t.Fatalf("release of held confirmed firing = %s, %v", got, err)
+func TestReleaseReturnsToScheduled(t *testing.T) {
+	got, err := Release(State{Status: OnHold, WasScheduled: true}, kilnMaster)
+	if err != nil || got != Scheduled {
+		t.Fatalf("release of held scheduled firing = %s, %v", got, err)
 	}
 }
 
 func TestReschedule(t *testing.T) {
 	for _, from := range AllStatuses {
 		err := Reschedule(State{Status: from}, kilnMaster)
-		want := slices.Contains([]Status{Proposed, OnHold, Confirmed}, from)
+		want := slices.Contains([]Status{Proposed, OnHold, Scheduled}, from)
 		if (err == nil) != want {
 			t.Errorf("reschedule from %s: err = %v", from, err)
 		}
@@ -69,80 +115,37 @@ func TestReschedule(t *testing.T) {
 	}
 }
 
-func TestAdvanceKilnMasterCanSkipForward(t *testing.T) {
-	for i, from := range lifecycle {
-		for j, to := range lifecycle[1:] {
-			err := Advance(State{Status: from}, to, kilnMaster)
-			if forward := j+1 > i; (err == nil) != forward {
-				t.Errorf("KM %s → %s: err = %v, want ok=%v", from, to, err, forward)
-			}
-		}
-	}
-}
-
-func TestAdvanceRejectsNonLifecycle(t *testing.T) {
-	for _, from := range []Status{Proposed, OnHold, Cancelled, Completed} {
-		if err := Advance(State{Status: from}, Loading, kilnMaster); !errors.Is(err, ErrInvalidTransition) {
-			t.Errorf("KM %s → loading: err = %v, want invalid", from, err)
-		}
-	}
-	for _, to := range []Status{Proposed, OnHold, Confirmed, Cancelled} {
-		if err := Advance(State{Status: Confirmed}, to, kilnMaster); !errors.Is(err, ErrInvalidTransition) {
-			t.Errorf("advance to %s should be rejected, got %v", to, err)
-		}
-	}
-}
-
-func TestAdvanceMember(t *testing.T) {
+func TestAdvance(t *testing.T) {
 	cases := []struct {
-		from, to Status
-		ok       bool
+		name string
+		from Status
+		to   Status
+		a    Actor
+		ok   bool
 	}{
-		{Confirmed, Loading, true},
-		{Loading, Loaded, true},
-		{Confirmed, Loaded, true}, // skipping loading is fine
-		{Cooling, Completed, true},
-		{Firing, Completed, true}, // skipping cooling is fine
-		{Loaded, Firing, false},   // never start the kiln
-		{Confirmed, Firing, false},
-		{Loaded, Completed, false}, // can't skip past the start
-		{Confirmed, Completed, false},
-		{Firing, Cooling, false},
-		{Completed, Completed, false},
-		{Loaded, Loading, false}, // backwards
+		{"KM starts", Scheduled, Firing, kilnMaster, true},
+		{"admin starts", Scheduled, Firing, admin, true},
+		{"member cannot start", Scheduled, Firing, member, false},
+		{"start only from scheduled", Proposed, Firing, kilnMaster, false},
+		{"cooling is automatic, not user-set", Scheduled, Cooling, kilnMaster, false},
+		{"member unloads while firing", Firing, Completed, member, true},
+		{"member unloads while cooling", Cooling, Completed, member, true},
+		{"KM unloads while cooling", Cooling, Completed, kilnMaster, true},
+		{"unload before start", Scheduled, Completed, member, false},
+		{"unload from completed", Completed, Completed, member, false},
+		{"backwards", Completed, Firing, kilnMaster, false},
 	}
 	for _, c := range cases {
-		err := Advance(State{Status: c.from}, c.to, member)
+		err := Advance(State{Status: c.from}, c.to, c.a)
 		if (err == nil) != c.ok {
-			t.Errorf("member %s → %s: err = %v, want ok=%v", c.from, c.to, err, c.ok)
-		}
-	}
-}
-
-func TestOnlyKilnMastersStartTheKiln(t *testing.T) {
-	for _, from := range lifecycle {
-		if err := Advance(State{Status: from}, Firing, member); !errors.Is(err, ErrForbidden) {
-			t.Errorf("member start from %s: err = %v, want forbidden", from, err)
-		}
-	}
-	for _, a := range []Actor{kilnMaster, admin} {
-		if err := Advance(State{Status: Loaded}, Firing, a); err != nil {
-			t.Errorf("%+v start: %v", a, err)
-		}
-	}
-}
-
-func TestMembersCannotSkipPastStart(t *testing.T) {
-	for _, to := range []Status{Firing, Cooling, Completed} {
-		if err := Advance(State{Status: Confirmed}, to, member); err == nil {
-			t.Errorf("member confirmed → %s should be refused", to)
+			t.Errorf("%s: %s → %s err = %v, want ok=%v", c.name, c.from, c.to, err, c.ok)
 		}
 	}
 }
 
 func TestDecideAndActive(t *testing.T) {
 	for _, s := range AllStatuses {
-		wantDecide := slices.Contains([]Status{Proposed, OnHold, Confirmed, Loading, Loaded}, s)
+		wantDecide := slices.Contains([]Status{Proposed, OnHold, Scheduled}, s)
 		if CanDecideRequests(s) != wantDecide {
 			t.Errorf("CanDecideRequests(%s) = %v", s, !wantDecide)
 		}

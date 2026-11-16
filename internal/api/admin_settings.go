@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 	"slices"
 	"strings"
@@ -13,25 +12,26 @@ import (
 // ── /admin/settings (spec §13): everything in settings, plus kilns ─────────
 
 type settingsDTO struct {
-	Timezone                 string       `json:"timezone"`
-	MinNoticeHours           int32        `json:"min_notice_hours"`
-	RequestCutoffHours       int32        `json:"request_cutoff_hours"`
-	UnderfilledThresholdPct  int32        `json:"underfilled_threshold_pct"`
-	FiringTypes              []string     `json:"firing_types"`
-	Cones                    []string     `json:"cones"`
-	Programs                 []programDTO `json:"programs"`
-	DiscordChannelID         string       `json:"discord_channel_id"`
-	SlackChannelID           string       `json:"slack_channel_id"`
-	MissedStartGraceMinutes  int32        `json:"missed_start_grace_minutes"`
-	MissedUnloadGraceMinutes int32        `json:"missed_unload_grace_minutes"`
-	DayReminderHour          int32        `json:"day_reminder_hour"`
-	PublicPageDaysAhead      int32        `json:"public_page_days_ahead"`
+	Timezone                 string   `json:"timezone"`
+	MinNoticeHours           int32    `json:"min_notice_hours"`
+	RequestCutoffHours       int32    `json:"request_cutoff_hours"`
+	UnderfilledThresholdPct  int32    `json:"underfilled_threshold_pct"`
+	FiringTypes              []string `json:"firing_types"`
+	Cones                    []string `json:"cones"`
+	DiscordChannelID         string   `json:"discord_channel_id"`
+	SlackChannelID           string   `json:"slack_channel_id"`
+	MissedStartGraceMinutes  int32    `json:"missed_start_grace_minutes"`
+	MissedUnloadGraceMinutes int32    `json:"missed_unload_grace_minutes"`
+	EscalationGraceMinutes   int32    `json:"escalation_grace_minutes"`
+	DayReminderHour          int32    `json:"day_reminder_hour"`
+	PublicPageDaysAhead      int32    `json:"public_page_days_ahead"`
 }
 
 // adminSettingsDTO adds read-only context the page shows next to the form.
 type adminSettingsDTO struct {
-	Settings settingsDTO `json:"settings"`
-	Kilns    []kilnDTO   `json:"kilns"`
+	Settings settingsDTO  `json:"settings"`
+	Kilns    []kilnDTO    `json:"kilns"`
+	Profiles []profileDTO `json:"profiles"`
 	Env      struct {
 		BaseURL                string `json:"base_url"` // for printable QR codes
 		DiscordBot             bool   `json:"discord_bot"`
@@ -46,9 +46,10 @@ func toSettingsDTO(st db.Setting) settingsDTO {
 	return settingsDTO{
 		Timezone: st.Timezone, MinNoticeHours: st.MinNoticeHours, RequestCutoffHours: st.RequestCutoffHours,
 		UnderfilledThresholdPct: st.UnderfilledThresholdPct, FiringTypes: st.FiringTypes, Cones: st.Cones,
-		Programs: parsePrograms(st.Programs), DiscordChannelID: st.DiscordChannelID, SlackChannelID: st.SlackChannelID,
+		DiscordChannelID: st.DiscordChannelID, SlackChannelID: st.SlackChannelID,
 		MissedStartGraceMinutes: st.MissedStartGraceMinutes, MissedUnloadGraceMinutes: st.MissedUnloadGraceMinutes,
-		DayReminderHour: st.DayReminderHour, PublicPageDaysAhead: st.PublicPageDaysAhead,
+		EscalationGraceMinutes: st.EscalationGraceMinutes,
+		DayReminderHour:        st.DayReminderHour, PublicPageDaysAhead: st.PublicPageDaysAhead,
 	}
 }
 
@@ -97,6 +98,7 @@ func (in settingsDTO) validate() (db.UpdateSettingsParams, error) {
 		intIn("Under-filled threshold", in.UnderfilledThresholdPct, 0, 100),
 		intIn("Missed start grace", in.MissedStartGraceMinutes, 0, 24*60),
 		intIn("Missed unload grace", in.MissedUnloadGraceMinutes, 0, 24*60),
+		intIn("Escalation grace", in.EscalationGraceMinutes, 0, 24*60),
 		intIn("Day reminder hour", in.DayReminderHour, 0, 23),
 		intIn("Public page days ahead", in.PublicPageDaysAhead, 1, 365),
 	} {
@@ -112,37 +114,16 @@ func (in settingsDTO) validate() (db.UpdateSettingsParams, error) {
 	if err != nil {
 		return p, err
 	}
-	programs := make([]programDTO, 0, len(in.Programs))
-	for _, pr := range in.Programs {
-		name := strings.TrimSpace(pr.Name)
-		if name == "" {
-			continue
-		}
-		if len([]rune(name)) > maxProgram {
-			return p, badRequest("program name %q is too long", name)
-		}
-		if slices.ContainsFunc(programs, func(o programDTO) bool { return strings.EqualFold(o.Name, name) }) {
-			return p, badRequest("program %q is listed twice", name)
-		}
-		if d := pr.DefaultDurationMinutes; d != nil && (*d < 1 || *d > 7*24*60) {
-			return p, badRequest("program %q: duration must be between 1 minute and 7 days", name)
-		}
-		programs = append(programs, programDTO{Name: name, DefaultDurationMinutes: pr.DefaultDurationMinutes})
-	}
-	if len(programs) > 30 {
-		return p, badRequest("at most 30 programs")
-	}
-	raw, _ := json.Marshal(programs)
 	discord, slack := strings.TrimSpace(in.DiscordChannelID), strings.TrimSpace(in.SlackChannelID)
 	if len(discord) > 100 || len(slack) > 100 {
 		return p, badRequest("channel ids are too long")
 	}
 	return db.UpdateSettingsParams{
 		Timezone: tz, MinNoticeHours: in.MinNoticeHours, RequestCutoffHours: in.RequestCutoffHours,
-		UnderfilledThresholdPct: in.UnderfilledThresholdPct, FiringTypes: types, Cones: cones, Programs: raw,
+		UnderfilledThresholdPct: in.UnderfilledThresholdPct, FiringTypes: types, Cones: cones,
 		DiscordChannelID: discord, SlackChannelID: slack, MissedStartGraceMinutes: in.MissedStartGraceMinutes,
-		MissedUnloadGraceMinutes: in.MissedUnloadGraceMinutes, DayReminderHour: in.DayReminderHour,
-		PublicPageDaysAhead: in.PublicPageDaysAhead,
+		MissedUnloadGraceMinutes: in.MissedUnloadGraceMinutes, EscalationGraceMinutes: in.EscalationGraceMinutes,
+		DayReminderHour: in.DayReminderHour, PublicPageDaysAhead: in.PublicPageDaysAhead,
 	}, nil
 }
 
@@ -160,11 +141,16 @@ func (s *Server) adminSettings(r *http.Request, st db.Setting) (adminSettingsDTO
 	if err != nil {
 		return out, err
 	}
+	profiles, err := s.queries.ListProfiles(r.Context())
+	if err != nil {
+		return out, err
+	}
 	out.Settings = toSettingsDTO(st)
 	out.Kilns = make([]kilnDTO, 0, len(kilns))
 	for _, k := range kilns {
 		out.Kilns = append(out.Kilns, toKilnDTO(k))
 	}
+	out.Profiles = profileDTOs(profiles)
 	out.Env.BaseURL = s.cfg.AppBaseURL
 	out.Env.DiscordBot, out.Env.SlackBot = s.notifyCfg.DiscordBotToken != "", s.notifyCfg.SlackBotToken != ""
 	out.Env.DiscordChannelFallback, out.Env.SlackChannelFallback = s.notifyCfg.DiscordChannelFallback, s.notifyCfg.SlackChannelFallback

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -135,18 +136,13 @@ func TestFiringsAndRequestsFlow(t *testing.T) {
 	km := e.login("Kim", true)       // kiln master
 
 	start := e.now.Add(72 * time.Hour)
-	proposal := map[string]any{
-		"firing_type": "glaze", "cone": "6", "scheduled_date": dayOf(start),
-		"description": "4 mugs", "share_pct": 30,
-	}
+	proposal := firingBody("glaze", "6", dayOf(start), "4 mugs", 30)
 
 	// Minimum notice: members need 48h, kiln masters can bypass.
-	soon := map[string]any{"firing_type": "glaze", "cone": "6", "scheduled_date": dayOf(e.now.Add(24 * time.Hour)),
-		"description": "x", "share_pct": 10}
+	soon := firingBody("glaze", "6", dayOf(e.now.Add(24*time.Hour)), "x", 10)
 	alice.mustDo("POST", "/api/firings", soon, http.StatusBadRequest)
 	km.mustDo("POST", "/api/firings", soon, http.StatusCreated)
-	alice.mustDo("POST", "/api/firings", map[string]any{"firing_type": "raku", "cone": "6",
-		"scheduled_date": dayOf(start), "description": "x", "share_pct": 10}, http.StatusBadRequest)
+	alice.mustDo("POST", "/api/firings", firingBody("raku", "6", dayOf(start), "x", 10), http.StatusBadRequest)
 
 	d := alice.mustDo("POST", "/api/firings", proposal, http.StatusCreated)
 	id := int64(jget(d, "firing", "id").(float64))
@@ -154,7 +150,7 @@ func TestFiringsAndRequestsFlow(t *testing.T) {
 	if jget(d, "firing", "status") != "proposed" || jget(d, "firing", "fullness", "display_pct") != 30.0 {
 		t.Fatalf("created firing = %v", d["firing"])
 	}
-	if jget(d, "can", "request") != false || jget(d, "can", "confirm") != false {
+	if jget(d, "can", "request") != false || jget(d, "can", "claim") != false {
 		t.Fatalf("proposer perms = %v", d["can"])
 	}
 	alice.mustDo("POST", base+"/requests", map[string]any{"description": "x", "share_pct": 5, "cone": "6"}, http.StatusConflict)
@@ -206,10 +202,13 @@ func TestFiringsAndRequestsFlow(t *testing.T) {
 	}
 	km.mustDo("PUT", base+"/fullness-override", map[string]any{"override_pct": nil}, http.StatusOK)
 
-	// Confirm, hold, release back to confirmed.
-	alice.mustDo("POST", base+"/confirm", nil, http.StatusForbidden)
-	km.mustDo("POST", base+"/confirm", nil, http.StatusOK)
-	km.mustDo("POST", base+"/confirm", nil, http.StatusConflict)
+	// Take the firing, hold it, release back to scheduled.
+	alice.mustDo("POST", base+"/claim", nil, http.StatusForbidden)
+	d = km.mustDo("POST", base+"/claim", nil, http.StatusOK)
+	if jget(d, "firing", "status") != "scheduled" || jget(d, "firing", "managed_by", "name") != "Kim" {
+		t.Fatalf("claimed = %v", d["firing"])
+	}
+	km.mustDo("POST", base+"/claim", nil, http.StatusConflict)
 	km.mustDo("POST", base+"/hold", map[string]any{"reason": ""}, http.StatusBadRequest)
 	d = km.mustDo("POST", base+"/hold", map[string]any{"reason": "not enough work"}, http.StatusOK)
 	if jget(d, "firing", "hold_reason") != "not enough work" || jget(d, "can", "release") != true {
@@ -217,7 +216,7 @@ func TestFiringsAndRequestsFlow(t *testing.T) {
 	}
 	newStart := start.Add(24 * time.Hour)
 	d = km.mustDo("POST", base+"/release", map[string]any{"scheduled_date": dayOf(newStart)}, http.StatusOK)
-	if jget(d, "firing", "status") != "confirmed" || jget(d, "firing", "hold_reason") != nil {
+	if jget(d, "firing", "status") != "scheduled" || jget(d, "firing", "hold_reason") != nil {
 		t.Fatalf("released = %v", d["firing"])
 	}
 	if got := jget(d, "firing", "scheduled_date"); got != dayOf(newStart) {
@@ -271,8 +270,8 @@ func TestFiringsAndRequestsFlow(t *testing.T) {
 		types[ev.(map[string]any)["type"].(string)]++
 	}
 	for typ, n := range map[string]int{
-		"created": 1, "request_submitted": 2, "request_updated": 1, "request_approved": 1,
-		"request_withdrawn": 1, "fullness_override": 2, "status_change": 4, "rescheduled": 2,
+		"created": 1, "claimed": 1, "request_submitted": 2, "request_updated": 1, "request_approved": 1,
+		"request_withdrawn": 1, "fullness_override": 2, "status_change": 3, "rescheduled": 2,
 		"requests_closed": 1, "requests_reopened": 2,
 	} {
 		if types[typ] != n {
@@ -321,8 +320,9 @@ func TestMultipleKilns(t *testing.T) {
 	}
 
 	body := func(kilnID int64) map[string]any {
-		return map[string]any{"kiln_id": kilnID, "firing_type": "glaze", "cone": "6",
-			"scheduled_date": dayOf(e.now.Add(72 * time.Hour)), "description": "mugs", "share_pct": 20}
+		b := firingBody("glaze", "6", dayOf(e.now.Add(72*time.Hour)), "mugs", 20)
+		b["kiln_id"] = kilnID
+		return b
 	}
 	// With two active kilns the kiln must be chosen, and must be active.
 	alice.mustDo("POST", "/api/firings", body(0), http.StatusBadRequest)
@@ -331,6 +331,57 @@ func TestMultipleKilns(t *testing.T) {
 	d := alice.mustDo("POST", "/api/firings", body(second), http.StatusCreated)
 	if jget(d, "firing", "kiln_id") != float64(second) {
 		t.Fatalf("kiln_id = %v, want %d", jget(d, "firing", "kiln_id"), second)
+	}
+}
+
+func TestProfilesOwnershipAndTargetedNotifications(t *testing.T) {
+	e, pool := newFiringEnvPool(t, func(c *config.Config) { c.NotificationsDryRun = true })
+	admin := e.loginWith("Ada", map[string]any{"admin": true})
+	kim := e.login("Kim", true)
+	lee := e.login("Lee", true)
+	alice := e.login("Alice", false)
+	bob := e.login("Bob", false)
+	kimID := int64(jget(kim.mustDo("GET", "/api/me", nil, http.StatusOK), "id").(float64))
+	leeID := int64(jget(lee.mustDo("GET", "/api/me", nil, http.StatusOK), "id").(float64))
+
+	opts := alice.mustDo("GET", "/api/options", nil, http.StatusOK)
+	kilnID := int64(opts["kilns"].([]any)[0].(map[string]any)["id"].(float64))
+	p := admin.mustDo("POST", "/api/admin/profiles", map[string]any{
+		"kiln_id": kilnID, "name": "Cone 6 Glaze — standard", "firing_type": "glaze", "cone": "6",
+		"firing_minutes": 600, "cooldown_minutes": 840, "active": true,
+	}, http.StatusCreated)
+	profileID := int64(p["id"].(float64))
+
+	// The proposer can choose the per-kiln preset; the profile name becomes the title.
+	d := alice.mustDo("POST", "/api/firings", map[string]any{
+		"profile_id": profileID, "scheduled_date": dayOf(e.now.Add(72 * time.Hour)),
+		"description": "mugs", "share_pct": 30,
+	}, http.StatusCreated)
+	base := fmt.Sprintf("/api/firings/%d", int64(jget(d, "firing", "id").(float64)))
+	if jget(d, "firing", "title") != "Cone 6 Glaze — standard" || jget(d, "firing", "firing_minutes") != 600.0 {
+		t.Fatalf("preset firing = %v", d["firing"])
+	}
+	drainOutbox(t, pool)
+
+	// Taking it targets future request DMs at the owner only.
+	d = kim.mustDo("POST", base+"/claim", nil, http.StatusOK)
+	if jget(d, "firing", "status") != "scheduled" || jget(d, "firing", "managed_by", "id") != float64(kimID) {
+		t.Fatalf("claim = %v", d["firing"])
+	}
+	drainOutbox(t, pool)
+	bob.mustDo("POST", base+"/requests", map[string]any{"description": "bowls", "share_pct": 20, "cone": "6"}, http.StatusOK)
+	if got := dmRecipients(drainOutbox(t, pool)); !slices.Equal(got, []int64{kimID}) {
+		t.Fatalf("request DMs = %v, want only the owner", got)
+	}
+
+	// Dropping it re-notifies the other kiln masters (the actor is skipped).
+	kim.mustDo("POST", base+"/unclaim", nil, http.StatusOK)
+	if got := dmRecipients(drainOutbox(t, pool)); !slices.Equal(got, []int64{leeID}) {
+		t.Fatalf("unclaim DMs = %v, want the other KM", got)
+	}
+	d = alice.mustDo("GET", base, nil, http.StatusOK)
+	if jget(d, "firing", "status") != "proposed" || jget(d, "firing", "managed_by") != nil {
+		t.Fatalf("after unclaim = %v", d["firing"])
 	}
 }
 

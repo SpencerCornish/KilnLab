@@ -18,6 +18,8 @@ import type {
   MutationResult,
   NewFiring,
   Options,
+  Profile,
+  ProfileInput,
   RequestInput,
 } from './types'
 
@@ -107,7 +109,11 @@ export const firingActions = {
   withdrawRequest: (id: number, rid: number) => request<MutationResult>(`${f(id)}/requests/${rid}/withdraw`, json('POST')),
   decide: (id: number, rid: number, decision: 'approve' | 'decline', note: string | null) =>
     request<MutationResult>(`${f(id)}/requests/${rid}/decide`, json('POST', { decision, note })),
-  confirm: (id: number) => request<MutationResult>(`${f(id)}/confirm`, json('POST')),
+  claim: (id: number, takeover = false) =>
+    request<MutationResult>(`${f(id)}/claim`, json('POST', { takeover })),
+  unclaim: (id: number) => request<MutationResult>(`${f(id)}/unclaim`, json('POST')),
+  changeProfile: (id: number, profileId: number | null, custom: NewFiring['custom']) =>
+    request<MutationResult>(`${f(id)}/profile`, json('PUT', { profile_id: profileId, custom })),
   hold: (id: number, reason: string) => request<MutationResult>(`${f(id)}/hold`, json('POST', { reason })),
   release: (id: number, scheduledDate: string | null) =>
     request<MutationResult>(`${f(id)}/release`, json('POST', { scheduled_date: scheduledDate })),
@@ -152,6 +158,13 @@ export const getSettings = () => request<AdminSettings>('/admin/settings')
 export const updateSettings = (s: Settings) => freshOptions(request<AdminSettings>('/admin/settings', json('PUT', s)))
 export const createKiln = (k: KilnInput) => freshOptions(request<Kiln>('/admin/kilns', json('POST', k)))
 export const updateKiln = (id: number, k: KilnInput) => freshOptions(request<Kiln>(`/admin/kilns/${id}`, json('PUT', k)))
+
+export const listProfiles = () => request<Profile[]>('/admin/profiles')
+export const createProfile = (p: ProfileInput) => freshOptions(request<Profile>('/admin/profiles', json('POST', p)))
+export const updateProfile = (id: number, p: ProfileInput) =>
+  freshOptions(request<Profile>(`/admin/profiles/${id}`, json('PUT', p)))
+export const deactivateProfile = (id: number) =>
+  freshOptions(request<Profile>(`/admin/profiles/${id}`, { method: 'DELETE' }))
 
 export const listBlackouts = () => request<Blackout[]>('/admin/blackouts')
 export const createBlackout = (b: BlackoutInput) => freshOptions(request<Blackout>('/admin/blackouts', json('POST', b)))

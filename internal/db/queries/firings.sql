@@ -2,10 +2,11 @@
 
 -- name: CreateFiring :one
 INSERT INTO firings (
-    kiln_id, proposed_by_user_id, firing_type, cone, title, notes, scheduled_date,
-    proposer_description, proposer_share_pct, proposer_cone, proposer_clay_body, requests_close_at
+    kiln_id, proposed_by_user_id, profile_id, firing_type, cone, title, notes, scheduled_date,
+    firing_minutes, cooldown_minutes, proposer_description, proposer_share_pct, proposer_cone,
+    proposer_clay_body, requests_close_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
 )
 RETURNING *;
 
@@ -19,6 +20,7 @@ SELECT * FROM firings WHERE id = $1 FOR UPDATE;
 -- Active firings, plus finished/cancelled ones scheduled after `since`.
 SELECT sqlc.embed(f),
        u.display_name AS proposer_name,
+       COALESCE(o.display_name, '')::text AS owner_name,
        COALESCE((SELECT sum(r.estimated_share_pct) FROM firing_requests r
                  WHERE r.firing_id = f.id AND r.status = 'approved'), 0)::int AS approved_share_pct,
        (SELECT count(*) FROM firing_requests r
@@ -30,6 +32,7 @@ SELECT sqlc.embed(f),
                  AND r.status IN ('pending', 'approved')) AS has_my_request
 FROM firings f
 JOIN users u ON u.id = f.proposed_by_user_id
+LEFT JOIN users o ON o.id = f.managed_by_user_id
 WHERE f.status NOT IN ('completed', 'cancelled') OR f.scheduled_date >= sqlc.arg(since)
 ORDER BY f.scheduled_date, f.id;
 
@@ -52,9 +55,65 @@ ORDER BY firing_id, share_pct DESC, user_id;
 -- name: SetFiringStatus :one
 UPDATE firings
 SET status = sqlc.arg(status),
-    was_confirmed = sqlc.arg(was_confirmed),
+    was_scheduled = sqlc.arg(was_scheduled),
     hold_reason = sqlc.narg(hold_reason),
     cancel_reason = sqlc.narg(cancel_reason),
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+RETURNING *;
+
+-- name: ClaimFiring :one
+-- The caller must be a kiln master/admin and the firing must still be unclaimed.
+-- Claiming a proposed firing schedules it; claiming an on-hold firing records
+-- that it counts as scheduled for a later release.
+UPDATE firings
+SET managed_by_user_id = sqlc.arg(user_id),
+    assigned_at = now(),
+    status = CASE WHEN status = 'proposed' THEN 'scheduled'::firing_status ELSE status END,
+    was_scheduled = CASE WHEN status = 'on_hold' THEN true ELSE was_scheduled END,
+    updated_at = now()
+WHERE id = sqlc.arg(id) AND managed_by_user_id IS NULL
+RETURNING *;
+
+-- name: ReassignFiring :one
+-- A takeover by another kiln master/admin.
+UPDATE firings
+SET managed_by_user_id = sqlc.arg(user_id),
+    assigned_at = now(),
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+RETURNING *;
+
+-- name: UnclaimFiring :one
+-- Drops responsibility. A scheduled firing goes back to proposed (needs a KM);
+-- an on-hold firing stays on hold.
+UPDATE firings
+SET managed_by_user_id = NULL,
+    assigned_at = NULL,
+    status = CASE WHEN status = 'scheduled' THEN 'proposed'::firing_status ELSE status END,
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+RETURNING *;
+
+-- name: ClearManagedFirings :exec
+-- A user who is no longer a kiln master shouldn't keep ownership of active firings.
+UPDATE firings
+SET managed_by_user_id = NULL,
+    assigned_at = NULL,
+    updated_at = now()
+WHERE managed_by_user_id = sqlc.arg(user_id)
+  AND status NOT IN ('completed', 'cancelled');
+
+-- name: SetFiringProfile :one
+-- Updates the profile snapshot. Callers recompute request compatibility when the
+-- type/cone changes.
+UPDATE firings
+SET profile_id = sqlc.narg(profile_id),
+    title = sqlc.arg(title),
+    firing_type = sqlc.arg(firing_type),
+    cone = sqlc.arg(cone),
+    firing_minutes = sqlc.arg(firing_minutes),
+    cooldown_minutes = sqlc.arg(cooldown_minutes),
     updated_at = now()
 WHERE id = sqlc.arg(id)
 RETURNING *;
@@ -66,6 +125,7 @@ SET scheduled_date = sqlc.arg(scheduled_date),
     requests_close_at = sqlc.arg(requests_close_at),
     underfilled_alert_sent_at = NULL,
     missed_start_reminder_sent_at = NULL,
+    missed_start_escalated_at = NULL,
     requests_close_handled_at = NULL,
     day_reminder_sent_at = NULL,
     updated_at = now()
@@ -146,6 +206,10 @@ SET status = sqlc.arg(status),
 WHERE id = sqlc.arg(id)
 RETURNING *;
 
+-- name: UpdateRequestCompatibility :exec
+UPDATE firing_requests SET compatibility_warning = sqlc.narg(compatibility_warning), updated_at = now()
+WHERE id = sqlc.arg(id);
+
 -- ── Events ──────────────────────────────────────────────────────────────────
 
 -- name: InsertEvent :exec
@@ -167,33 +231,29 @@ ORDER BY e.occurred_at, e.id;
 -- name: GetUserName :one
 SELECT display_name FROM users WHERE id = $1;
 
--- ── Lifecycle (M2) ──────────────────────────────────────────────────────────
+-- ── Lifecycle ───────────────────────────────────────────────────────────────
 
 -- name: AdvanceFiring :one
 -- Moves along the lifecycle. NULL arguments leave columns unchanged.
 UPDATE firings
 SET status = sqlc.arg(status),
-    program = COALESCE(sqlc.narg(program), program),
-    estimated_duration_minutes = COALESCE(sqlc.narg(estimated_duration_minutes), estimated_duration_minutes),
     started_at = COALESCE(sqlc.narg(started_at), started_at),
-    estimated_unload_at = COALESCE(sqlc.narg(estimated_unload_at), estimated_unload_at),
+    firing_ends_at = COALESCE(sqlc.narg(firing_ends_at), firing_ends_at),
+    unloadable_at = COALESCE(sqlc.narg(unloadable_at), unloadable_at),
     cooling_at = COALESCE(sqlc.narg(cooling_at), cooling_at),
     unloaded_at = COALESCE(sqlc.narg(unloaded_at), unloaded_at),
-    ready_for_pickup_at = COALESCE(sqlc.narg(ready_for_pickup_at), ready_for_pickup_at),
-    completed_at = COALESCE(sqlc.narg(completed_at), completed_at),
     updated_at = now()
 WHERE id = sqlc.arg(id)
 RETURNING *;
 
 -- name: CorrectTimestamps :one
--- Sets all lifecycle timestamps at once (the caller changes one and validates order).
+-- Sets the lifecycle timestamps at once (the caller changes one and validates order).
 UPDATE firings
 SET started_at = sqlc.narg(started_at),
-    estimated_unload_at = sqlc.narg(estimated_unload_at),
+    firing_ends_at = sqlc.narg(firing_ends_at),
+    unloadable_at = sqlc.narg(unloadable_at),
     cooling_at = sqlc.narg(cooling_at),
     unloaded_at = sqlc.narg(unloaded_at),
-    ready_for_pickup_at = sqlc.narg(ready_for_pickup_at),
-    completed_at = sqlc.narg(completed_at),
     updated_at = now()
 WHERE id = sqlc.arg(id)
 RETURNING *;
@@ -201,10 +261,16 @@ RETURNING *;
 -- name: ListKilnCandidates :many
 -- Firings that might be relevant at the kiln; firing.RelevantAtKiln makes the final call.
 -- kiln_id 0 means every kiln.
-SELECT sqlc.embed(f), u.display_name AS proposer_name
+SELECT sqlc.embed(f), u.display_name AS proposer_name,
+       COALESCE(o.display_name, '')::text AS owner_name
 FROM firings f
 JOIN users u ON u.id = f.proposed_by_user_id
+LEFT JOIN users o ON o.id = f.managed_by_user_id
 WHERE (sqlc.arg(kiln_id)::bigint = 0 OR f.kiln_id = sqlc.arg(kiln_id))
-  AND (f.status IN ('loading', 'loaded', 'firing', 'cooling')
-       OR (f.status = 'confirmed' AND f.scheduled_date BETWEEN sqlc.arg(window_start) AND sqlc.arg(window_end)))
+  AND (f.status IN ('firing', 'cooling')
+       OR (f.status IN ('proposed', 'on_hold', 'scheduled')
+           AND f.scheduled_date BETWEEN sqlc.arg(window_start) AND sqlc.arg(window_end)))
 ORDER BY f.scheduled_date, f.id;
+
+-- name: CountApprovedRequests :one
+SELECT count(*)::int FROM firing_requests WHERE firing_id = $1 AND status = 'approved';

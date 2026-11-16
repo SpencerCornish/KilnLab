@@ -12,7 +12,7 @@ import (
 
 const listPublicFirings = `-- name: ListPublicFirings :many
 
-SELECT f.id, f.kiln_id, f.proposed_by_user_id, f.firing_type, f.cone, f.title, f.notes, f.status, f.was_confirmed, f.hold_reason, f.cancel_reason, f.proposer_description, f.proposer_share_pct, f.proposer_cone, f.proposer_clay_body, f.fullness_override_pct, f.requests_close_at, f.requests_closed_manually, f.program, f.estimated_duration_minutes, f.started_at, f.estimated_unload_at, f.cooling_at, f.unloaded_at, f.ready_for_pickup_at, f.completed_at, f.underfilled_alert_sent_at, f.missed_start_reminder_sent_at, f.missed_unload_reminder_sent_at, f.created_at, f.updated_at, f.requests_close_handled_at, f.scheduled_date, f.day_reminder_sent_at,
+SELECT f.id, f.kiln_id, f.proposed_by_user_id, f.managed_by_user_id, f.assigned_at, f.profile_id, f.firing_type, f.cone, f.title, f.notes, f.scheduled_date, f.status, f.was_scheduled, f.hold_reason, f.cancel_reason, f.proposer_description, f.proposer_share_pct, f.proposer_cone, f.proposer_clay_body, f.fullness_override_pct, f.requests_close_at, f.requests_closed_manually, f.firing_minutes, f.cooldown_minutes, f.started_at, f.firing_ends_at, f.unloadable_at, f.cooling_at, f.unloaded_at, f.underfilled_alert_sent_at, f.requests_close_handled_at, f.missed_start_reminder_sent_at, f.missed_start_escalated_at, f.missed_unload_reminder_sent_at, f.missed_unload_escalated_at, f.day_reminder_sent_at, f.created_at, f.updated_at,
        COALESCE((SELECT sum(r.estimated_share_pct) FROM firing_requests r
                  WHERE r.firing_id = f.id AND r.status = 'approved'), 0)::int AS approved_share_pct,
        (SELECT count(*) FROM firing_requests r
@@ -21,7 +21,7 @@ FROM firings f
 WHERE f.status::text = ANY ($1::text[])
   AND f.scheduled_date <= $2
   AND (f.scheduled_date >= $3
-       OR f.status IN ('loading', 'loaded', 'firing', 'cooling'))
+       OR f.status IN ('firing', 'cooling'))
 ORDER BY f.scheduled_date, f.id
 `
 
@@ -53,12 +53,16 @@ func (q *Queries) ListPublicFirings(ctx context.Context, arg ListPublicFiringsPa
 			&i.Firing.ID,
 			&i.Firing.KilnID,
 			&i.Firing.ProposedByUserID,
+			&i.Firing.ManagedByUserID,
+			&i.Firing.AssignedAt,
+			&i.Firing.ProfileID,
 			&i.Firing.FiringType,
 			&i.Firing.Cone,
 			&i.Firing.Title,
 			&i.Firing.Notes,
+			&i.Firing.ScheduledDate,
 			&i.Firing.Status,
-			&i.Firing.WasConfirmed,
+			&i.Firing.WasScheduled,
 			&i.Firing.HoldReason,
 			&i.Firing.CancelReason,
 			&i.Firing.ProposerDescription,
@@ -68,22 +72,22 @@ func (q *Queries) ListPublicFirings(ctx context.Context, arg ListPublicFiringsPa
 			&i.Firing.FullnessOverridePct,
 			&i.Firing.RequestsCloseAt,
 			&i.Firing.RequestsClosedManually,
-			&i.Firing.Program,
-			&i.Firing.EstimatedDurationMinutes,
+			&i.Firing.FiringMinutes,
+			&i.Firing.CooldownMinutes,
 			&i.Firing.StartedAt,
-			&i.Firing.EstimatedUnloadAt,
+			&i.Firing.FiringEndsAt,
+			&i.Firing.UnloadableAt,
 			&i.Firing.CoolingAt,
 			&i.Firing.UnloadedAt,
-			&i.Firing.ReadyForPickupAt,
-			&i.Firing.CompletedAt,
 			&i.Firing.UnderfilledAlertSentAt,
+			&i.Firing.RequestsCloseHandledAt,
 			&i.Firing.MissedStartReminderSentAt,
+			&i.Firing.MissedStartEscalatedAt,
 			&i.Firing.MissedUnloadReminderSentAt,
+			&i.Firing.MissedUnloadEscalatedAt,
+			&i.Firing.DayReminderSentAt,
 			&i.Firing.CreatedAt,
 			&i.Firing.UpdatedAt,
-			&i.Firing.RequestsCloseHandledAt,
-			&i.Firing.ScheduledDate,
-			&i.Firing.DayReminderSentAt,
 			&i.ApprovedSharePct,
 			&i.ApprovedCount,
 		); err != nil {

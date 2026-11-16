@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, Navigate, useParams, useSearchParams } from 'react-router'
 import { Alert, firingTitle, kilnLabel, StatusBadge, STATUS_LABELS } from '../components/firing'
 import { LifecyclePanel, STEP_LABELS } from '../components/lifecycle'
-import { getFiring, getKilnView, getOptions } from '../lib/api'
+import { firingActions, getFiring, getKilnView, getOptions } from '../lib/api'
 import { PageSpinner } from '../lib/session'
 import { formatDate, formatWhen } from '../lib/time'
 import type { FiringStatus, MutationResult } from '../lib/types'
@@ -29,7 +29,7 @@ export function KilnPage() {
       {view.firings.length === 0 ? (
         <div className="kc-plate kc-plate--pad space-y-4 text-center">
           <p className="kc-title kc-title--sm">No active firing</p>
-          <p className="kc-caption kc-caption--body">Nothing is loading or running, and nothing confirmed starts within a day.</p>
+          <p className="kc-caption kc-caption--body">Nothing is loading or running, and nothing scheduled starts within a day.</p>
           <Link to="/" className="kc-key kc-key--block kc-key--fire">
             See the schedule
           </Link>
@@ -49,6 +49,7 @@ export function KilnPage() {
                   <p className="kc-caption kc-caption--body">
                     {!view.kiln && kilnLabel(options, f.kiln_id) && `${kilnLabel(options, f.kiln_id)} · `}
                     {f.proposer_name}
+                    {f.owner_name ? ` · run by ${f.owner_name}` : ' · needs a kiln master'}
                   </p>
                 </div>
               </Link>
@@ -67,6 +68,8 @@ export function KilnFiringPage() {
   const k = params.get('k')
   const { data, error, setData } = useLoad(() => Promise.all([getFiring(id), getOptions()]), [id])
   const [done, setDone] = useState<FiringStatus | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [claimError, setClaimError] = useState<string | null>(null)
 
   if (error) return <Alert kind="error">{error === 'not found' ? 'That firing does not exist.' : error}</Alert>
   if (!data) return <PageSpinner />
@@ -78,6 +81,20 @@ export function KilnFiringPage() {
     setData([res, options])
     setDone(step)
     window.scrollTo({ top: 0 })
+  }
+
+  async function claim() {
+    setBusy(true)
+    setClaimError(null)
+    try {
+      const res = await firingActions.claim(id)
+      setData([res, options])
+      window.scrollTo({ top: 0 })
+    } catch (e) {
+      setClaimError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -105,16 +122,22 @@ export function KilnFiringPage() {
             {kilnLabel(options, f.kiln_id) && `${kilnLabel(options, f.kiln_id)} · `}
             {f.fullness.display_pct}% full · {1 + detail.requests.filter((r) => r.status === 'approved').length} people
           </p>
-          {f.status === 'firing' && f.estimated_unload_at && (
+          {(f.status === 'firing' || f.status === 'cooling') && f.unloadable_at && (
             <div className="kc-readout">
-              <span className="kc-readout__label">Estimated unload</span>
-              <span className="kc-readout__value">{formatWhen(f.estimated_unload_at, tz)}</span>
+              <span className="kc-readout__label">Ready to unload</span>
+              <span className="kc-readout__value">{formatWhen(f.unloadable_at, tz)}</span>
             </div>
           )}
-          {f.program && <p className="kc-data kc-muted">Program: {f.program}</p>}
+          {f.managed_by && <p className="kc-data kc-muted">Run by {f.managed_by.name}</p>}
         </div>
       </section>
 
+      {claimError && <Alert kind="error">{claimError}</Alert>}
+      {!done && detail.can.claim && (
+        <button disabled={busy} onClick={() => void claim()} className="kc-key kc-key--block kc-key--fire kc-key--lg">
+          {busy ? 'Taking…' : 'Take this firing'}
+        </button>
+      )}
       {!done && <LifecyclePanel detail={detail} options={options} source="kiln_qr" onDone={onDone} />}
       {done && detail.can.next_steps.length > 0 && (
         <button onClick={() => setDone(null)} className="kc-key kc-key--block">

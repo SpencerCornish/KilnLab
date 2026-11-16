@@ -19,8 +19,11 @@ func ThreadStarted(f db.Firing, loc *time.Location) string {
 	if f.StartedAt != nil {
 		s += " " + f.StartedAt.In(loc).Format(timeLayout)
 	}
-	if f.EstimatedUnloadAt != nil {
-		s += " · est. unload " + f.EstimatedUnloadAt.In(loc).Format(whenLayout)
+	if f.FiringEndsAt != nil {
+		s += " · est. cool " + f.FiringEndsAt.In(loc).Format(whenLayout)
+	}
+	if f.UnloadableAt != nil {
+		s += " · ready to unload " + f.UnloadableAt.In(loc).Format(whenLayout)
 	}
 	return s
 }
@@ -65,39 +68,63 @@ func DMReady(f db.Firing, loc *time.Location, url string) string {
 	return fmt.Sprintf("✅ %s is ready for pickup!\n%s", Describe(f, loc), url)
 }
 
+func DMTakenOver(f db.Firing, loc *time.Location, actorName, url string) string {
+	return fmt.Sprintf("🙋 %s is now being run by %s.\n%s", Describe(f, loc), actorName, url)
+}
+
+func AlertUnclaimed(f db.Firing, loc *time.Location, actorName, url string) string {
+	return fmt.Sprintf("🙋 %s was dropped by %s and needs a kiln master.\n%s", Describe(f, loc), actorName, url)
+}
+
 // ── Kiln-master alerts ──────────────────────────────────────────────────────
 
-// AlertRequestReceived tells the kiln masters someone asked to join a firing.
+// AlertRequestReceived tells the responsible kiln master(s) someone asked to join.
 func AlertRequestReceived(f db.Firing, loc *time.Location, requester string, share int32, url string) string {
 	return fmt.Sprintf("📩 %s requested %d%% in %s.\n%s", requester, share, Describe(f, loc), url)
 }
 
-func AlertUnderfilled(f db.Firing, loc *time.Location, pct int, unconfirmed bool, url string) string {
+func AlertUnderfilled(f db.Firing, loc *time.Location, pct int, needsOwner bool, url string) string {
 	s := fmt.Sprintf("⚠️ %s is only %d%% full and requests are closed", Describe(f, loc), pct)
-	if unconfirmed {
-		s += " (not confirmed yet)"
+	if needsOwner {
+		s += " and no one has taken it"
 	}
 	return s + ".\nRun it anyway, postpone it, reopen requests or cancel:\n" + url
 }
 
-func AlertNeedsConfirmation(f db.Firing, loc *time.Location, pct int, url string) string {
-	return fmt.Sprintf("📝 Requests are closed for %s (~%d%% full) and it still needs confirming.\n%s",
+func AlertNeedsOwner(f db.Firing, loc *time.Location, pct int, url string) string {
+	return fmt.Sprintf("🙋 %s is ~%d%% full and no kiln master has taken it yet.\n%s",
 		Describe(f, loc), pct, url)
 }
 
 // AlertMorning is the day-of reminder: the firing is on today.
-func AlertMorning(f db.Firing, loc *time.Location, url string) string {
-	return fmt.Sprintf("🌅 %s is today.\n%s", Describe(f, loc), url)
+func AlertMorning(f db.Firing, loc *time.Location, needsOwner bool, url string) string {
+	s := fmt.Sprintf("🌅 %s is today", Describe(f, loc))
+	if needsOwner {
+		s += " and still needs a kiln master"
+	}
+	return s + ".\n" + url
 }
 
 func AlertMissedStart(f db.Firing, loc *time.Location, url string) string {
 	return fmt.Sprintf("⏰ %s hasn't been marked started yet.\n%s", Describe(f, loc), url)
 }
 
+func AlertMissedStartEscalation(f db.Firing, loc *time.Location, ownerName, url string) string {
+	return fmt.Sprintf("⏰ %s still hasn't been marked started (run by %s).\n%s", Describe(f, loc), ownerName, url)
+}
+
 func AlertMissedUnload(f db.Firing, loc *time.Location, url string) string {
 	when := ""
-	if f.EstimatedUnloadAt != nil {
-		when = " (est. unload " + f.EstimatedUnloadAt.In(loc).Format(whenLayout) + ")"
+	if f.UnloadableAt != nil {
+		when = " (ready to unload " + f.UnloadableAt.In(loc).Format(whenLayout) + ")"
 	}
-	return fmt.Sprintf("⏰ %s%s hasn't been marked unloaded yet.\n%s", Title(f), when, url)
+	return fmt.Sprintf("⏰ %s%s hasn't been unloaded yet.\n%s", Title(f), when, url)
+}
+
+func AlertMissedUnloadEscalation(f db.Firing, loc *time.Location, ownerName, url string) string {
+	when := ""
+	if f.UnloadableAt != nil {
+		when = " (ready to unload " + f.UnloadableAt.In(loc).Format(whenLayout) + ")"
+	}
+	return fmt.Sprintf("⏰ %s%s still hasn't been unloaded (run by %s).\n%s", Title(f), when, ownerName, url)
 }

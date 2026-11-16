@@ -16,9 +16,9 @@ func TestPublicUpcomingAndCalendar(t *testing.T) {
 	km := e.login("Kim", true)
 
 	mk := func(c *apiClient, in time.Duration, share int) string {
-		d := c.mustDo("POST", "/api/firings", map[string]any{"firing_type": "glaze", "cone": "6",
-			"scheduled_date": dayOf(e.now.Add(in)), "description": "secret notes", "share_pct": share,
-			"notes": "my private note"}, http.StatusCreated)
+		body := firingBody("glaze", "6", dayOf(e.now.Add(in)), "secret notes", share)
+		body["notes"] = "my private note"
+		d := c.mustDo("POST", "/api/firings", body, http.StatusCreated)
 		return fmt.Sprintf("/api/firings/%d", int64(jget(d, "firing", "id").(float64)))
 	}
 	soon := mk(alice, 72*time.Hour, 40)
@@ -69,7 +69,7 @@ func TestPublicUpcomingAndCalendar(t *testing.T) {
 	if n := strings.Count(string(ics), "BEGIN:VEVENT"); n != 1 {
 		t.Fatalf("events = %d\n%s", n, ics)
 	}
-	if !strings.Contains(string(ics), "SUMMARY:Cone 6 Glaze (75% full)") || !strings.Contains(string(ics), "STATUS:TENTATIVE") {
+	if !strings.Contains(string(ics), "SUMMARY:Cone 6 glaze (75% full)") || !strings.Contains(string(ics), "STATUS:TENTATIVE") {
 		t.Fatalf("ics =\n%s", ics)
 	}
 }
@@ -88,12 +88,12 @@ func TestAdminSettings(t *testing.T) {
 
 	st["min_notice_hours"] = 24
 	st["day_reminder_hour"] = 6
+	st["escalation_grace_minutes"] = 90
 	st["cones"] = []string{" 6 ", "10", ""}
-	st["programs"] = []map[string]any{{"name": "Slow glaze", "default_duration_minutes": 600}, {"name": " "}}
 	got = admin.mustDo("PUT", "/api/admin/settings", st, http.StatusOK)
 	st = got["settings"].(map[string]any)
 	if st["min_notice_hours"] != 24.0 || st["day_reminder_hour"] != 6.0 ||
-		len(st["cones"].([]any)) != 2 || len(st["programs"].([]any)) != 1 {
+		st["escalation_grace_minutes"] != 90.0 || len(st["cones"].([]any)) != 2 {
 		t.Fatalf("after update = %v", st)
 	}
 	opts := km.mustDo("GET", "/api/options", nil, http.StatusOK)
@@ -107,6 +107,7 @@ func TestAdminSettings(t *testing.T) {
 		"no types":      func(m map[string]any) { m["firing_types"] = []string{} },
 		"threshold":     func(m map[string]any) { m["underfilled_threshold_pct"] = 150 },
 		"reminder hour": func(m map[string]any) { m["day_reminder_hour"] = 24 },
+		"escalation":    func(m map[string]any) { m["escalation_grace_minutes"] = -1 },
 		"days":          func(m map[string]any) { m["public_page_days_ahead"] = 0 },
 	} {
 		m := map[string]any{}
@@ -131,4 +132,27 @@ func TestAdminSettings(t *testing.T) {
 		http.StatusConflict)
 	admin.mustDo("PUT", "/api/admin/kilns/999999", map[string]any{"name": "x", "active": true}, http.StatusNotFound)
 	admin.mustDo("PUT", fmt.Sprintf("/api/admin/kilns/%d", first), map[string]any{"name": "Big kiln", "active": true}, http.StatusOK)
+
+	// Profiles: per kiln, active ones appear in the proposal options.
+	p := admin.mustDo("POST", "/api/admin/profiles", map[string]any{
+		"kiln_id": first, "name": "Cone 6 Glaze — standard", "firing_type": "glaze", "cone": "6",
+		"firing_minutes": 600, "cooldown_minutes": 840, "active": true,
+	}, http.StatusCreated)
+	profileID := int64(p["id"].(float64))
+	opts = km.mustDo("GET", "/api/options", nil, http.StatusOK)
+	if n := len(opts["profiles"].([]any)); n != 1 {
+		t.Fatalf("options profiles = %v", opts["profiles"])
+	}
+	p = admin.mustDo("PUT", fmt.Sprintf("/api/admin/profiles/%d", profileID), map[string]any{
+		"kiln_id": first, "name": "Cone 6 Glaze — slow", "firing_type": "glaze", "cone": "6",
+		"firing_minutes": 720, "cooldown_minutes": 840, "active": true,
+	}, http.StatusOK)
+	if p["name"] != "Cone 6 Glaze — slow" {
+		t.Fatalf("profile update = %v", p)
+	}
+	admin.mustDo("DELETE", fmt.Sprintf("/api/admin/profiles/%d", profileID), nil, http.StatusOK)
+	opts = km.mustDo("GET", "/api/options", nil, http.StatusOK)
+	if n := len(opts["profiles"].([]any)); n != 0 {
+		t.Fatalf("deactivated profile should not be offered: %v", opts["profiles"])
+	}
 }

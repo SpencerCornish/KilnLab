@@ -1,5 +1,12 @@
 # Kiln Firing Coordinator — Build Spec (v1)
 
+> **Post-v1 status (2026-11-16):** the app now uses per-kiln firing profiles chosen by
+> the proposer, explicit firing ownership (“Take this firing”) instead of confirm,
+> automatic cooling, and a single `completed` unload step. Loading/loaded are gone.
+> See [docs/DECISIONS.md](docs/DECISIONS.md) D52–D57 and
+> [docs/USER_STORIES.md](docs/USER_STORIES.md) for the current behaviour. This spec
+> remains the original product brief.
+>
 > Handoff document for a coding agent. Read this whole file before writing code.
 > Where something is marked **[CONFIRM]**, ask the owner before implementing.
 

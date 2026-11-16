@@ -9,7 +9,7 @@ import (
 
 // ── Requests window (§6) ────────────────────────────────────────────────────
 
-var requestsOpenStatuses = []Status{Proposed, OnHold, Confirmed}
+var requestsOpenStatuses = []Status{Proposed, OnHold, Scheduled}
 
 // RequestsCloseAt = the scheduled day's start − cutoff (see DayStart).
 func RequestsCloseAt(start time.Time, cutoffHours int32) time.Time {
@@ -23,7 +23,7 @@ type Window struct {
 	ClosedManually bool
 }
 
-// RequestsOpen: status ∈ {proposed, on_hold, confirmed} and now < close_at and
+// RequestsOpen: status ∈ {proposed, on_hold, scheduled} and now < close_at and
 // not closed manually. Also gates editing/withdrawing your own request.
 func RequestsOpen(w Window, now time.Time) bool {
 	return slices.Contains(requestsOpenStatuses, w.Status) && now.Before(w.CloseAt) && !w.ClosedManually

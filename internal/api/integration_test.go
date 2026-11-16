@@ -39,7 +39,7 @@ func openTestPool(t *testing.T) *pgxpool.Pool {
 		t.Fatalf("truncate: %v", err)
 	}
 	// Back to the single kiln seeded by the first migration.
-	if _, err := pool.Exec(ctx, `DELETE FROM kilns WHERE id <> (SELECT min(id) FROM kilns)`); err != nil {
+	if _, err := pool.Exec(ctx, `DELETE FROM kilns WHERE id <> (SELECT min(id) FROM kilns); DELETE FROM firing_profiles`); err != nil {
 		t.Fatalf("reset kilns: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `UPDATE kilns SET name = 'Studio kiln', active = true, interior_width_in = NULL,
@@ -260,3 +260,20 @@ func dayOf(t time.Time) string { return firing.DayOf(t, studioLoc).Format(firing
 
 // dayStart is when that scheduled day begins: where the notice and cutoff rules count from.
 func dayStart(t time.Time) time.Time { return firing.DayStart(firing.DayOf(t, studioLoc), studioLoc) }
+
+// firingBody is a proposal using the "Other" path, so tests don't need to seed
+// a profile first. Preset-specific tests create a profile explicitly.
+func firingBody(typ, cone, day, description string, share int) map[string]any {
+	return map[string]any{
+		"custom": map[string]any{
+			"name":             "Cone " + cone + " " + typ,
+			"firing_type":      typ,
+			"cone":             cone,
+			"firing_minutes":   480,
+			"cooldown_minutes": 720,
+		},
+		"scheduled_date": day,
+		"description":    description,
+		"share_pct":      share,
+	}
+}

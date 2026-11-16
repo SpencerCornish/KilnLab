@@ -13,14 +13,19 @@ import (
 const listJobCandidates = `-- name: ListJobCandidates :many
 
 SELECT id FROM firings
-WHERE (status IN ('proposed', 'on_hold', 'confirmed') AND requests_close_handled_at IS NULL
+WHERE (status IN ('proposed', 'on_hold', 'scheduled') AND requests_close_handled_at IS NULL
        AND (requests_close_at <= $1 OR requests_closed_manually))
-   OR (status IN ('confirmed', 'loading', 'loaded') AND missed_start_reminder_sent_at IS NULL
+   OR (status = 'scheduled' AND missed_start_reminder_sent_at IS NULL
        AND scheduled_date <= $2)
+   OR (status = 'scheduled' AND missed_start_reminder_sent_at IS NOT NULL
+       AND missed_start_escalated_at IS NULL AND scheduled_date <= $2)
    OR (status IN ('firing', 'cooling') AND missed_unload_reminder_sent_at IS NULL
-       AND estimated_unload_at <= $1)
-   OR (status IN ('proposed', 'on_hold', 'confirmed', 'loading', 'loaded') AND day_reminder_sent_at IS NULL
+       AND unloadable_at IS NOT NULL AND unloadable_at <= $1)
+   OR (status IN ('firing', 'cooling') AND missed_unload_reminder_sent_at IS NOT NULL
+       AND missed_unload_escalated_at IS NULL AND unloadable_at IS NOT NULL AND unloadable_at <= $1)
+   OR (status IN ('proposed', 'on_hold', 'scheduled') AND day_reminder_sent_at IS NULL
        AND scheduled_date <= $2)
+   OR (status = 'firing' AND firing_ends_at IS NOT NULL AND firing_ends_at <= $1)
 ORDER BY id
 `
 
@@ -29,7 +34,7 @@ type ListJobCandidatesParams struct {
 	Today time.Time `json:"today"`
 }
 
-// ── Scheduled jobs (M4, spec §10) ──────────────────────────────────────────
+// ── Scheduled jobs ──────────────────────────────────────────────────────────
 // Firings some job might act on. jobs.Due makes the final call (grace periods etc.).
 func (q *Queries) ListJobCandidates(ctx context.Context, arg ListJobCandidatesParams) ([]int64, error) {
 	rows, err := q.db.Query(ctx, listJobCandidates, arg.Now, arg.Today)
@@ -56,17 +61,21 @@ UPDATE firings
 SET requests_close_handled_at = COALESCE($1, requests_close_handled_at),
     underfilled_alert_sent_at = COALESCE($2, underfilled_alert_sent_at),
     missed_start_reminder_sent_at = COALESCE($3, missed_start_reminder_sent_at),
-    missed_unload_reminder_sent_at = COALESCE($4, missed_unload_reminder_sent_at),
-    day_reminder_sent_at = COALESCE($5, day_reminder_sent_at)
-WHERE id = $6
-RETURNING id, kiln_id, proposed_by_user_id, firing_type, cone, title, notes, status, was_confirmed, hold_reason, cancel_reason, proposer_description, proposer_share_pct, proposer_cone, proposer_clay_body, fullness_override_pct, requests_close_at, requests_closed_manually, program, estimated_duration_minutes, started_at, estimated_unload_at, cooling_at, unloaded_at, ready_for_pickup_at, completed_at, underfilled_alert_sent_at, missed_start_reminder_sent_at, missed_unload_reminder_sent_at, created_at, updated_at, requests_close_handled_at, scheduled_date, day_reminder_sent_at
+    missed_start_escalated_at = COALESCE($4, missed_start_escalated_at),
+    missed_unload_reminder_sent_at = COALESCE($5, missed_unload_reminder_sent_at),
+    missed_unload_escalated_at = COALESCE($6, missed_unload_escalated_at),
+    day_reminder_sent_at = COALESCE($7, day_reminder_sent_at)
+WHERE id = $8
+RETURNING id, kiln_id, proposed_by_user_id, managed_by_user_id, assigned_at, profile_id, firing_type, cone, title, notes, scheduled_date, status, was_scheduled, hold_reason, cancel_reason, proposer_description, proposer_share_pct, proposer_cone, proposer_clay_body, fullness_override_pct, requests_close_at, requests_closed_manually, firing_minutes, cooldown_minutes, started_at, firing_ends_at, unloadable_at, cooling_at, unloaded_at, underfilled_alert_sent_at, requests_close_handled_at, missed_start_reminder_sent_at, missed_start_escalated_at, missed_unload_reminder_sent_at, missed_unload_escalated_at, day_reminder_sent_at, created_at, updated_at
 `
 
 type MarkJobsDoneParams struct {
 	RequestsCloseHandledAt     *time.Time `json:"requests_close_handled_at"`
 	UnderfilledAlertSentAt     *time.Time `json:"underfilled_alert_sent_at"`
 	MissedStartReminderSentAt  *time.Time `json:"missed_start_reminder_sent_at"`
+	MissedStartEscalatedAt     *time.Time `json:"missed_start_escalated_at"`
 	MissedUnloadReminderSentAt *time.Time `json:"missed_unload_reminder_sent_at"`
+	MissedUnloadEscalatedAt    *time.Time `json:"missed_unload_escalated_at"`
 	DayReminderSentAt          *time.Time `json:"day_reminder_sent_at"`
 	ID                         int64      `json:"id"`
 }
@@ -77,7 +86,9 @@ func (q *Queries) MarkJobsDone(ctx context.Context, arg MarkJobsDoneParams) (Fir
 		arg.RequestsCloseHandledAt,
 		arg.UnderfilledAlertSentAt,
 		arg.MissedStartReminderSentAt,
+		arg.MissedStartEscalatedAt,
 		arg.MissedUnloadReminderSentAt,
+		arg.MissedUnloadEscalatedAt,
 		arg.DayReminderSentAt,
 		arg.ID,
 	)
@@ -86,12 +97,16 @@ func (q *Queries) MarkJobsDone(ctx context.Context, arg MarkJobsDoneParams) (Fir
 		&i.ID,
 		&i.KilnID,
 		&i.ProposedByUserID,
+		&i.ManagedByUserID,
+		&i.AssignedAt,
+		&i.ProfileID,
 		&i.FiringType,
 		&i.Cone,
 		&i.Title,
 		&i.Notes,
+		&i.ScheduledDate,
 		&i.Status,
-		&i.WasConfirmed,
+		&i.WasScheduled,
 		&i.HoldReason,
 		&i.CancelReason,
 		&i.ProposerDescription,
@@ -101,22 +116,22 @@ func (q *Queries) MarkJobsDone(ctx context.Context, arg MarkJobsDoneParams) (Fir
 		&i.FullnessOverridePct,
 		&i.RequestsCloseAt,
 		&i.RequestsClosedManually,
-		&i.Program,
-		&i.EstimatedDurationMinutes,
+		&i.FiringMinutes,
+		&i.CooldownMinutes,
 		&i.StartedAt,
-		&i.EstimatedUnloadAt,
+		&i.FiringEndsAt,
+		&i.UnloadableAt,
 		&i.CoolingAt,
 		&i.UnloadedAt,
-		&i.ReadyForPickupAt,
-		&i.CompletedAt,
 		&i.UnderfilledAlertSentAt,
+		&i.RequestsCloseHandledAt,
 		&i.MissedStartReminderSentAt,
+		&i.MissedStartEscalatedAt,
 		&i.MissedUnloadReminderSentAt,
+		&i.MissedUnloadEscalatedAt,
+		&i.DayReminderSentAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.RequestsCloseHandledAt,
-		&i.ScheduledDate,
-		&i.DayReminderSentAt,
 	)
 	return i, err
 }

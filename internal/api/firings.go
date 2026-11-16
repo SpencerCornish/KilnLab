@@ -55,6 +55,8 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 		s.writeError(w, r, http.StatusNotFound, "not found", nil)
 	case errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "firing_requests_one_live_per_user_idx":
 		s.writeError(w, r, http.StatusConflict, "you already have a request in this firing", nil)
+	case errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "firing_profiles_kiln_id_name_key":
+		s.writeError(w, r, http.StatusConflict, "a profile with that name already exists for this kiln", nil)
 	default:
 		s.writeError(w, r, http.StatusInternalServerError, "something went wrong", err)
 	}
@@ -76,6 +78,8 @@ const (
 	maxNotes       = 2000
 	maxClayBody    = 120
 	maxReason      = 500
+	maxProfileName = 120
+	maxDurationMin = 7 * 24 * 60
 )
 
 // text trims s and checks its length. required rejects empty.
@@ -116,6 +120,109 @@ func checkCone(settings db.Setting, cone string) error {
 	return nil
 }
 
+func checkFiringType(settings db.Setting, typ string) error {
+	if !slices.Contains(settings.FiringTypes, typ) {
+		return badRequest("unknown firing type %q", typ)
+	}
+	return nil
+}
+
+// ── Profiles ────────────────────────────────────────────────────────────────
+
+type profileDTO struct {
+	ID              int64  `json:"id"`
+	KilnID          int64  `json:"kiln_id"`
+	Name            string `json:"name"`
+	FiringType      string `json:"firing_type"`
+	Cone            string `json:"cone"`
+	FiringMinutes   int32  `json:"firing_minutes"`
+	CooldownMinutes int32  `json:"cooldown_minutes"`
+	Active          bool   `json:"active"`
+}
+
+func toProfileDTO(p db.FiringProfile) profileDTO {
+	return profileDTO{ID: p.ID, KilnID: p.KilnID, Name: p.Name, FiringType: p.FiringType, Cone: p.Cone,
+		FiringMinutes: p.FiringMinutes, CooldownMinutes: p.CooldownMinutes, Active: p.Active}
+}
+
+func profileDTOs(ps []db.FiringProfile) []profileDTO {
+	out := make([]profileDTO, 0, len(ps))
+	for _, p := range ps {
+		out = append(out, toProfileDTO(p))
+	}
+	return out
+}
+
+// profileSnapshot is the subset of a profile a firing stores.
+type profileSnapshot struct {
+	ProfileID       *int64
+	Title           string
+	FiringType      string
+	Cone            string
+	FiringMinutes   int32
+	CooldownMinutes int32
+}
+
+type profileValues struct {
+	Name            string `json:"name"`
+	FiringType      string `json:"firing_type"`
+	Cone            string `json:"cone"`
+	FiringMinutes   int32  `json:"firing_minutes"`
+	CooldownMinutes int32  `json:"cooldown_minutes"`
+}
+
+func validateProfileValues(st db.Setting, in profileValues) (profileSnapshot, error) {
+	name, err := text("firing name", in.Name, maxProfileName, true)
+	if err != nil {
+		return profileSnapshot{}, err
+	}
+	if err := checkFiringType(st, in.FiringType); err != nil {
+		return profileSnapshot{}, err
+	}
+	if err := checkCone(st, in.Cone); err != nil {
+		return profileSnapshot{}, err
+	}
+	if in.FiringMinutes < 1 || in.FiringMinutes > maxDurationMin {
+		return profileSnapshot{}, badRequest("firing time must be between 1 minute and 7 days")
+	}
+	if in.CooldownMinutes < 0 || in.CooldownMinutes > maxDurationMin {
+		return profileSnapshot{}, badRequest("cooldown time must be between 0 minutes and 7 days")
+	}
+	return profileSnapshot{
+		Title: name, FiringType: in.FiringType, Cone: in.Cone,
+		FiringMinutes: in.FiringMinutes, CooldownMinutes: in.CooldownMinutes,
+	}, nil
+}
+
+// resolveProfile turns a profile id or custom values into the snapshot a firing
+// stores. Exactly one of profileID/custom must be set.
+func (s *Server) resolveProfile(ctx context.Context, q *db.Queries, kilnID int64, profileID *int64, custom *profileValues) (profileSnapshot, error) {
+	if profileID != nil && custom != nil {
+		return profileSnapshot{}, badRequest("choose a firing profile or custom values, not both")
+	}
+	if profileID != nil {
+		p, err := q.GetProfile(ctx, *profileID)
+		if err != nil {
+			return profileSnapshot{}, err
+		}
+		if p.KilnID != kilnID || !p.Active {
+			return profileSnapshot{}, badRequest("that firing profile isn't available for this kiln")
+		}
+		return profileSnapshot{
+			ProfileID: &p.ID, Title: p.Name, FiringType: p.FiringType, Cone: p.Cone,
+			FiringMinutes: p.FiringMinutes, CooldownMinutes: p.CooldownMinutes,
+		}, nil
+	}
+	if custom == nil {
+		return profileSnapshot{}, badRequest("choose a firing profile")
+	}
+	st, err := q.GetSettings(ctx)
+	if err != nil {
+		return profileSnapshot{}, err
+	}
+	return validateProfileValues(st, *custom)
+}
+
 // ── Response shapes ─────────────────────────────────────────────────────────
 
 type userRef struct {
@@ -124,51 +231,58 @@ type userRef struct {
 }
 
 type firingDTO struct {
-	ID                       int64           `json:"id"`
-	KilnID                   int64           `json:"kiln_id"`
-	Title                    *string         `json:"title"`
-	FiringType               string          `json:"firing_type"`
-	Cone                     string          `json:"cone"`
-	Notes                    string          `json:"notes"`
-	ScheduledDate            Day             `json:"scheduled_date"`
-	Status                   db.FiringStatus `json:"status"`
-	HoldReason               *string         `json:"hold_reason"`
-	CancelReason             *string         `json:"cancel_reason"`
-	Proposer                 userRef         `json:"proposer"`
-	ProposerDescription      string          `json:"proposer_description"`
-	ProposerSharePct         int32           `json:"proposer_share_pct"`
-	ProposerCone             string          `json:"proposer_cone"`
-	ProposerClayBody         *string         `json:"proposer_clay_body"`
-	Fullness                 firing.Fullness `json:"fullness"`
-	RequestsCloseAt          time.Time       `json:"requests_close_at"`
-	RequestsClosedManually   bool            `json:"requests_closed_manually"`
-	RequestsOpen             bool            `json:"requests_open"`
-	LoaderUserID             *int64          `json:"loader_user_id"`
-	Program                  *string         `json:"program"`
-	EstimatedDurationMinutes *int32          `json:"estimated_duration_minutes"`
-	StartedAt                *time.Time      `json:"started_at"`
-	EstimatedUnloadAt        *time.Time      `json:"estimated_unload_at"`
-	CoolingAt                *time.Time      `json:"cooling_at"`
-	UnloadedAt               *time.Time      `json:"unloaded_at"`
-	ReadyForPickupAt         *time.Time      `json:"ready_for_pickup_at"`
-	CompletedAt              *time.Time      `json:"completed_at"`
-	CreatedAt                time.Time       `json:"created_at"`
+	ID                     int64           `json:"id"`
+	KilnID                 int64           `json:"kiln_id"`
+	Title                  string          `json:"title"`
+	FiringType             string          `json:"firing_type"`
+	Cone                   string          `json:"cone"`
+	Notes                  string          `json:"notes"`
+	ScheduledDate          Day             `json:"scheduled_date"`
+	Status                 db.FiringStatus `json:"status"`
+	HoldReason             *string         `json:"hold_reason"`
+	CancelReason           *string         `json:"cancel_reason"`
+	Proposer               userRef         `json:"proposer"`
+	ManagedBy              *userRef        `json:"managed_by"`
+	ProposerDescription    string          `json:"proposer_description"`
+	ProposerSharePct       int32           `json:"proposer_share_pct"`
+	ProposerCone           string          `json:"proposer_cone"`
+	ProposerClayBody       *string         `json:"proposer_clay_body"`
+	Fullness               firing.Fullness `json:"fullness"`
+	RequestsCloseAt        time.Time       `json:"requests_close_at"`
+	RequestsClosedManually bool            `json:"requests_closed_manually"`
+	RequestsOpen           bool            `json:"requests_open"`
+	ProfileID              *int64          `json:"profile_id"`
+	FiringMinutes          int32           `json:"firing_minutes"`
+	CooldownMinutes        int32           `json:"cooldown_minutes"`
+	StartedAt              *time.Time      `json:"started_at"`
+	FiringEndsAt           *time.Time      `json:"firing_ends_at"`
+	UnloadableAt           *time.Time      `json:"unloadable_at"`
+	CoolingAt              *time.Time      `json:"cooling_at"`
+	UnloadedAt             *time.Time      `json:"unloaded_at"`
+	ReadyToUnload          bool            `json:"ready_to_unload"`
+	CreatedAt              time.Time       `json:"created_at"`
 }
 
-func (s *Server) toFiringDTO(f db.Firing, proposerName string, approved []int32) firingDTO {
+func (s *Server) toFiringDTO(f db.Firing, proposerName, ownerName string, approved []int32) firingDTO {
+	var managed *userRef
+	if f.ManagedByUserID != nil {
+		managed = &userRef{ID: *f.ManagedByUserID, Name: ownerName}
+	}
 	return firingDTO{
 		ID: f.ID, KilnID: f.KilnID, Title: f.Title, FiringType: f.FiringType, Cone: f.Cone, Notes: f.Notes,
 		ScheduledDate: Day(f.ScheduledDate), Status: f.Status, HoldReason: f.HoldReason, CancelReason: f.CancelReason,
 		Proposer:            userRef{f.ProposedByUserID, proposerName},
+		ManagedBy:           managed,
 		ProposerDescription: f.ProposerDescription, ProposerSharePct: f.ProposerSharePct,
 		ProposerCone: f.ProposerCone, ProposerClayBody: f.ProposerClayBody,
 		Fullness:        firing.ComputeFullness(f.ProposerSharePct, approved, f.FullnessOverridePct),
 		RequestsCloseAt: f.RequestsCloseAt, RequestsClosedManually: f.RequestsClosedManually,
 		RequestsOpen: firing.RequestsOpen(window(f), s.now()),
-		Program:      f.Program, EstimatedDurationMinutes: f.EstimatedDurationMinutes,
-		StartedAt: f.StartedAt, EstimatedUnloadAt: f.EstimatedUnloadAt, CoolingAt: f.CoolingAt,
-		UnloadedAt: f.UnloadedAt, ReadyForPickupAt: f.ReadyForPickupAt, CompletedAt: f.CompletedAt,
-		CreatedAt: f.CreatedAt,
+		ProfileID:    f.ProfileID, FiringMinutes: f.FiringMinutes, CooldownMinutes: f.CooldownMinutes,
+		StartedAt: f.StartedAt, FiringEndsAt: f.FiringEndsAt, UnloadableAt: f.UnloadableAt,
+		CoolingAt: f.CoolingAt, UnloadedAt: f.UnloadedAt,
+		ReadyToUnload: firing.ReadyToUnload(f.Status, f.UnloadableAt, s.now()),
+		CreatedAt:     f.CreatedAt,
 	}
 }
 
@@ -180,7 +294,7 @@ type firingSummaryDTO struct {
 	firingDTO
 	ApprovedCount int32 `json:"approved_count"`
 	PendingCount  int32 `json:"pending_count"`
-	IsMine        bool  `json:"is_mine"` // I proposed it or have a live request in it
+	IsMine        bool  `json:"is_mine"` // I proposed it, have a live request in it, or run it
 	// Everyone with work in it, biggest share first. Powers the list card.
 	Participants []participantDTO `json:"participants"`
 }
@@ -229,15 +343,17 @@ type eventDTO struct {
 // firingPermsDTO tells the SPA which controls to show. The server re-checks
 // every action anyway.
 type firingPermsDTO struct {
-	Request    bool `json:"request"`
-	Manage     bool `json:"manage"` // override fullness, close/reopen requests
-	Confirm    bool `json:"confirm"`
-	Hold       bool `json:"hold"`
-	Release    bool `json:"release"`
-	Reschedule bool `json:"reschedule"`
-	Cancel     bool `json:"cancel"`
+	Request       bool `json:"request"`
+	Manage        bool `json:"manage"` // override fullness, close/reopen requests
+	Claim         bool `json:"claim"`
+	Unclaim       bool `json:"unclaim"`
+	ChangeProfile bool `json:"change_profile"`
+	Hold          bool `json:"hold"`
+	Release       bool `json:"release"`
+	Reschedule    bool `json:"reschedule"`
+	Cancel        bool `json:"cancel"`
 
-	// Lifecycle (M2).
+	// Lifecycle.
 	NextSteps         []db.FiringStatus `json:"next_steps"`     // buttons to offer, in order
 	BlockedReason     string            `json:"blocked_reason"` // why there are none, if relevant
 	Backdate          bool              `json:"backdate"`       // may set an earlier time on a step
@@ -262,6 +378,12 @@ func (s *Server) firingDetail(ctx context.Context, q *db.Queries, id int64, u *c
 	if err != nil {
 		return nil, err
 	}
+	ownerName := ""
+	if f.ManagedByUserID != nil {
+		if ownerName, err = q.GetUserName(ctx, *f.ManagedByUserID); err != nil {
+			return nil, err
+		}
+	}
 	rows, err := q.ListRequestsForFiring(ctx, id)
 	if err != nil {
 		return nil, err
@@ -277,7 +399,7 @@ func (s *Server) firingDetail(ctx context.Context, q *db.Queries, id int64, u *c
 			approved = append(approved, row.FiringRequest.EstimatedSharePct)
 		}
 	}
-	d := &firingDetailDTO{Firing: s.toFiringDTO(f, proposerName, approved), Requests: []requestDTO{}, Events: []eventDTO{}}
+	d := &firingDetailDTO{Firing: s.toFiringDTO(f, proposerName, ownerName, approved), Requests: []requestDTO{}, Events: []eventDTO{}}
 
 	open := d.Firing.RequestsOpen
 	canDecide := u.Roles.CanDecideRequests(f.ProposedByUserID == u.ID) && firing.CanDecideRequests(f.Status)
@@ -328,16 +450,20 @@ func (s *Server) firingDetail(ctx context.Context, q *db.Queries, id int64, u *c
 	}
 
 	actor := firing.Actor{Roles: u.Roles}
-	st := firing.State{Status: f.Status, WasConfirmed: f.WasConfirmed}
+	st := firing.State{Status: f.Status, WasScheduled: f.WasScheduled}
 	ok := func(_ firing.Status, err error) bool { return err == nil }
+	ownerMe := f.ManagedByUserID != nil && *f.ManagedByUserID == u.ID
+	preStart := slices.Contains([]db.FiringStatus{firing.Proposed, firing.OnHold, firing.Scheduled}, f.Status)
 	d.Can = firingPermsDTO{
-		Request:    open && !hasLive && f.ProposedByUserID != u.ID,
-		Manage:     u.Roles.CanManageFirings() && firing.IsActive(f.Status),
-		Confirm:    ok(firing.Confirm(st, actor)),
-		Hold:       ok(firing.Hold(st, actor)),
-		Release:    ok(firing.Release(st, actor)),
-		Reschedule: firing.Reschedule(st, actor) == nil,
-		Cancel:     ok(firing.Cancel(st, actor)),
+		Request:       open && !hasLive && f.ProposedByUserID != u.ID,
+		Manage:        u.Roles.CanManageFirings() && firing.IsActive(f.Status),
+		Claim:         u.Roles.CanManageFirings() && f.ManagedByUserID == nil && ok(firing.Claim(st, actor)),
+		Unclaim:       (ownerMe || u.Roles.CanEditSettings()) && ok(firing.Unclaim(st)),
+		ChangeProfile: (ownerMe || u.Roles.CanEditSettings()) && preStart,
+		Hold:          ok(firing.Hold(st, actor)),
+		Release:       ok(firing.Release(st, actor)),
+		Reschedule:    firing.Reschedule(st, actor) == nil,
+		Cancel:        ok(firing.Cancel(st, actor)),
 
 		NextSteps:         firing.NextSteps(st, actor),
 		BlockedReason:     firing.BlockedReason(st, actor),
@@ -376,7 +502,7 @@ type optionsDTO struct {
 	FiringTypes        []string      `json:"firing_types"`
 	Cones              []string      `json:"cones"`
 	Kilns              []kilnDTO     `json:"kilns"` // active first; inactive kept for old firings
-	Programs           []programDTO  `json:"programs"`
+	Profiles           []profileDTO  `json:"profiles"`
 	Blackouts          []blackoutDTO `json:"blackouts"` // dates each kiln can't take new firings
 }
 
@@ -393,6 +519,11 @@ func (s *Server) handleOptions(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
+	profiles, err := s.queries.ListActiveProfiles(ctx)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
 	blackouts, err := s.queries.ListBlackouts(ctx)
 	if err != nil {
 		s.fail(w, r, err)
@@ -401,7 +532,7 @@ func (s *Server) handleOptions(w http.ResponseWriter, r *http.Request) {
 	out := optionsDTO{
 		Timezone: st.Timezone, MinNoticeHours: st.MinNoticeHours, RequestCutoffHours: st.RequestCutoffHours,
 		FiringTypes: st.FiringTypes, Cones: st.Cones, Kilns: make([]kilnDTO, 0, len(kilns)),
-		Programs: parsePrograms(st.Programs), Blackouts: make([]blackoutDTO, 0, len(blackouts)),
+		Profiles: profileDTOs(profiles), Blackouts: make([]blackoutDTO, 0, len(blackouts)),
 	}
 	for _, k := range kilns {
 		out.Kilns = append(out.Kilns, toKilnDTO(k))
@@ -475,10 +606,11 @@ func (s *Server) handleListFirings(w http.ResponseWriter, r *http.Request) {
 		if people == nil {
 			people = []participantDTO{} // always a list in JSON, never null
 		}
+		managedByMe := row.Firing.ManagedByUserID != nil && *row.Firing.ManagedByUserID == u.ID
 		out = append(out, firingSummaryDTO{
-			firingDTO:     s.toFiringDTO(row.Firing, row.ProposerName, approved),
+			firingDTO:     s.toFiringDTO(row.Firing, row.ProposerName, row.OwnerName, approved),
 			ApprovedCount: row.ApprovedCount, PendingCount: row.PendingCount,
-			IsMine:       row.Firing.ProposedByUserID == u.ID || row.HasMyRequest,
+			IsMine:       row.Firing.ProposedByUserID == u.ID || row.HasMyRequest || managedByMe,
 			Participants: people,
 		})
 	}
@@ -499,16 +631,16 @@ func (s *Server) handleGetFiring(w http.ResponseWriter, r *http.Request) {
 }
 
 type createFiringRequest struct {
-	KilnID        int64   `json:"kiln_id"` // optional while only one kiln is active
-	FiringType    string  `json:"firing_type"`
-	Cone          string  `json:"cone"`
-	Title         *string `json:"title"`
-	Notes         string  `json:"notes"`
-	ScheduledDate Day     `json:"scheduled_date"` // the day; no start time is promised
-	Description   string  `json:"description"`
-	SharePct      int32   `json:"share_pct"`
-	ProposerCone  string  `json:"proposer_cone"` // defaults to cone
-	ClayBody      *string `json:"clay_body"`
+	KilnID        int64          `json:"kiln_id"` // optional while only one kiln is active
+	ProfileID     *int64         `json:"profile_id"`
+	Custom        *profileValues `json:"custom"`
+	ScheduledDate Day            `json:"scheduled_date"` // the day; no start time is promised
+	Description   string         `json:"description"`
+	SharePct      int32          `json:"share_pct"`
+	ProposerCone  string         `json:"proposer_cone"` // defaults to the profile cone
+	ClayBody      *string        `json:"clay_body"`
+	Notes         string         `json:"notes"`
+	SaveProfile   bool           `json:"save_profile"` // custom values only; KMs/admins
 }
 
 func (s *Server) handleCreateFiring(w http.ResponseWriter, r *http.Request) {
@@ -528,22 +660,27 @@ func (s *Server) handleCreateFiring(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		p := db.CreateFiringParams{KilnID: kiln.ID, ProposedByUserID: u.ID, ProposerSharePct: req.SharePct}
-		if !slices.Contains(st.FiringTypes, req.FiringType) {
-			return badRequest("unknown firing type %q", req.FiringType)
-		}
-		p.FiringType = req.FiringType
-		if err := checkCone(st, req.Cone); err != nil {
+		snap, err := s.resolveProfile(ctx, q, kiln.ID, req.ProfileID, req.Custom)
+		if err != nil {
 			return err
 		}
-		p.Cone = req.Cone
-		p.ProposerCone = req.Cone
-		if req.ProposerCone != "" {
-			if err := checkCone(st, req.ProposerCone); err != nil {
+		if req.SaveProfile {
+			if req.Custom == nil {
+				return badRequest("only custom values can be saved as a profile")
+			}
+			if !u.Roles.CanManageFirings() {
+				return forbidden("only kiln masters can save firing profiles")
+			}
+			p, err := q.CreateProfile(ctx, db.CreateProfileParams{
+				KilnID: kiln.ID, Name: snap.Title, FiringType: snap.FiringType, Cone: snap.Cone,
+				FiringMinutes: snap.FiringMinutes, CooldownMinutes: snap.CooldownMinutes, Active: true,
+			})
+			if err != nil {
 				return err
 			}
-			p.ProposerCone = req.ProposerCone
+			snap.ProfileID = &p.ID
 		}
+
 		day := time.Time(req.ScheduledDate)
 		if day.IsZero() {
 			return badRequest("date is required")
@@ -555,31 +692,42 @@ func (s *Server) handleCreateFiring(w http.ResponseWriter, r *http.Request) {
 		if err := s.requireAvailable(ctx, q, kiln.ID, day); err != nil {
 			return err
 		}
-		p.ScheduledDate = day
 		start := firing.DayStart(day, loc)
 		if !u.Roles.CanBypassMinNotice() {
 			if err := firing.CheckMinNotice(start, s.now(), st.MinNoticeHours); err != nil {
 				return badRequest("%s", err.Error())
 			}
 		}
-		p.RequestsCloseAt = firing.RequestsCloseAt(start, st.RequestCutoffHours)
 		if err := checkShare(req.SharePct); err != nil {
 			return err
 		}
-		if p.ProposerDescription, err = text("description", req.Description, maxDescription, true); err != nil {
+		description, err := text("description", req.Description, maxDescription, true)
+		if err != nil {
 			return err
 		}
-		if p.Notes, err = text("notes", req.Notes, maxNotes, false); err != nil {
+		notes, err := text("notes", req.Notes, maxNotes, false)
+		if err != nil {
 			return err
 		}
-		if p.Title, err = optText("title", req.Title, maxTitle); err != nil {
+		clayBody, err := optText("clay body", req.ClayBody, maxClayBody)
+		if err != nil {
 			return err
 		}
-		if p.ProposerClayBody, err = optText("clay body", req.ClayBody, maxClayBody); err != nil {
-			return err
+		proposerCone := snap.Cone
+		if req.ProposerCone != "" {
+			if err := checkCone(st, req.ProposerCone); err != nil {
+				return err
+			}
+			proposerCone = req.ProposerCone
 		}
 
-		f, err := q.CreateFiring(ctx, p)
+		f, err := q.CreateFiring(ctx, db.CreateFiringParams{
+			KilnID: kiln.ID, ProposedByUserID: u.ID, ProfileID: snap.ProfileID,
+			FiringType: snap.FiringType, Cone: snap.Cone, Title: snap.Title, Notes: notes,
+			ScheduledDate: day, FiringMinutes: snap.FiringMinutes, CooldownMinutes: snap.CooldownMinutes,
+			ProposerDescription: description, ProposerSharePct: req.SharePct, ProposerCone: proposerCone,
+			ProposerClayBody: clayBody, RequestsCloseAt: firing.RequestsCloseAt(start, st.RequestCutoffHours),
+		})
 		if err != nil {
 			return err
 		}

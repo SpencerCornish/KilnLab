@@ -34,6 +34,7 @@ type Card struct {
 type CardInput struct {
 	Firing        db.Firing
 	ProposerName  string
+	OwnerName     string // empty when unclaimed
 	KilnName      string // only set when there are several kilns
 	ApprovedCount int
 	Fullness      firing.Fullness
@@ -47,17 +48,8 @@ const (
 	timeLayout = "3:04pm"
 )
 
-// Title is the firing's name: its title, or "Cone 6 Glaze".
-func Title(f db.Firing) string {
-	if f.Title != nil && *f.Title != "" {
-		return *f.Title
-	}
-	t := f.FiringType
-	if t != "" {
-		t = strings.ToUpper(t[:1]) + t[1:]
-	}
-	return fmt.Sprintf("Cone %s %s", f.Cone, t)
-}
+// Title is the firing's name: the profile/custom name snapshot.
+func Title(f db.Firing) string { return f.Title }
 
 // Describe is "Cone 6 Glaze (Thu Nov 13)", for DMs. Firings are booked by day.
 func Describe(f db.Firing, loc *time.Location) string {
@@ -70,9 +62,9 @@ func FiringURL(baseURL string, id int64) string {
 }
 
 var statusColors = map[db.FiringStatus]int{
-	firing.Proposed: 0x0284c7, firing.OnHold: 0xd97706, firing.Confirmed: 0x15803d,
-	firing.Loading: 0x4f46e5, firing.Loaded: 0x4f46e5, firing.Firing: 0xdc2626, firing.Cooling: 0x2563eb,
-	firing.Completed: 0x0d9488, firing.Cancelled: 0xa8a29e,
+	firing.Proposed: 0x0284c7, firing.Scheduled: 0x15803d, firing.OnHold: 0xd97706,
+	firing.Firing: 0xdc2626, firing.Cooling: 0x2563eb, firing.Completed: 0x0d9488,
+	firing.Cancelled: 0xa8a29e,
 }
 
 // RenderCard builds the main message (§11 "Main message content").
@@ -103,8 +95,21 @@ func RenderCard(in CardInput) Card {
 		if f.StartedAt != nil {
 			line += " · started " + f.StartedAt.In(loc).Format(timeLayout)
 		}
-		if f.EstimatedUnloadAt != nil {
-			line += " · est. unload " + f.EstimatedUnloadAt.In(loc).Format("Mon 3:04pm")
+		if f.FiringEndsAt != nil {
+			line += " · est. cool " + f.FiringEndsAt.In(loc).Format("Mon 3:04pm")
+		}
+		if f.UnloadableAt != nil {
+			line += " · ready to unload " + f.UnloadableAt.In(loc).Format("Mon 3:04pm")
+		}
+		c.Lines = append(c.Lines, line)
+	case firing.Cooling:
+		line := "Cooling"
+		if f.UnloadableAt != nil {
+			if firing.ReadyToUnload(f.Status, f.UnloadableAt, in.Now) {
+				line += " · ready to unload now"
+			} else {
+				line += " · ready to unload " + f.UnloadableAt.In(loc).Format("Mon 3:04pm")
+			}
 		}
 		c.Lines = append(c.Lines, line)
 	case firing.Completed:
@@ -116,7 +121,7 @@ func RenderCard(in CardInput) Card {
 		}
 		c.Lines = append(c.Lines, "❌ Cancelled"+reason)
 		c.Cancelled = true
-	case firing.Proposed, firing.Confirmed:
+	case firing.Proposed, firing.Scheduled:
 		c.Lines = append(c.Lines, fmt.Sprintf("Status: %s · %s", statusName(f.Status), full))
 	default:
 		c.Lines = append(c.Lines, "Status: "+statusName(f.Status))
@@ -127,10 +132,15 @@ func RenderCard(in CardInput) Card {
 		by += " · " + in.KilnName
 	}
 	c.Lines = append(c.Lines, by)
+	if in.OwnerName != "" {
+		c.Lines = append(c.Lines, "Run by "+in.OwnerName)
+	} else if f.Status != firing.Completed && f.Status != firing.Cancelled {
+		c.Lines = append(c.Lines, "Needs a kiln master")
+	}
 
 	if firing.RequestsOpen(firing.Window{Status: f.Status, CloseAt: f.RequestsCloseAt, ClosedManually: f.RequestsClosedManually}, in.Now) {
 		c.Lines = append(c.Lines, "Requests close "+f.RequestsCloseAt.In(loc).Format(whenLayout))
-	} else if f.Status == firing.Proposed || f.Status == firing.OnHold || f.Status == firing.Confirmed {
+	} else if f.Status == firing.Proposed || f.Status == firing.OnHold || f.Status == firing.Scheduled {
 		c.Lines = append(c.Lines, "Requests closed")
 	}
 	return c

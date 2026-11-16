@@ -115,6 +115,7 @@ func rulesFrom(st db.Setting) Rules {
 		UnderfilledPct:    int(st.UnderfilledThresholdPct),
 		MissedStartGrace:  time.Duration(st.MissedStartGraceMinutes) * time.Minute,
 		MissedUnloadGrace: time.Duration(st.MissedUnloadGraceMinutes) * time.Minute,
+		EscalationGrace:   time.Duration(st.EscalationGraceMinutes) * time.Minute,
 	}
 }
 
@@ -137,30 +138,56 @@ func (r *Runner) process(ctx context.Context, id int64, now time.Time) (bool, er
 		}
 		full := firing.ComputeFullness(f.ProposerSharePct, approved, f.FullnessOverridePct)
 		loc := studioLoc(st.Timezone)
+		hasOwner := r.hasResponsibleOwner(ctx, q, f)
 		due := Due(Snapshot{
-			Status: f.Status, CreatedAt: f.CreatedAt, DayEnd: firing.DayEnd(f.ScheduledDate, loc),
+			Status: f.Status, HasOwner: hasOwner, CreatedAt: f.CreatedAt,
+			DayEnd:          firing.DayEnd(f.ScheduledDate, loc),
 			DayReminderAt:   firing.DayStart(f.ScheduledDate, loc).Add(time.Duration(st.DayReminderHour) * time.Hour),
 			RequestsCloseAt: f.RequestsCloseAt, ClosedManually: f.RequestsClosedManually,
-			EstimatedUnloadAt: f.EstimatedUnloadAt, FullnessPct: full.Display,
+			FiringEndsAt: f.FiringEndsAt, UnloadableAt: f.UnloadableAt, FullnessPct: full.Display,
 			CloseHandledAt: f.RequestsCloseHandledAt, MissedStartSentAt: f.MissedStartReminderSentAt,
-			MissedUnloadSentAt: f.MissedUnloadReminderSentAt, DayReminderSentAt: f.DayReminderSentAt,
+			MissedStartEscalatedAt:  f.MissedStartEscalatedAt,
+			MissedUnloadSentAt:      f.MissedUnloadReminderSentAt,
+			MissedUnloadEscalatedAt: f.MissedUnloadEscalatedAt,
+			DayReminderSentAt:       f.DayReminderSentAt,
 		}, rulesFrom(st), now)
 		if !due.Any() {
 			return nil
 		}
 		acted = true
-		return r.apply(ctx, q, f, st, full.Display, due, now)
+		return r.apply(ctx, q, f, st, hasOwner, full.Display, due, now)
 	})
 	return acted, err
 }
 
-func (r *Runner) apply(ctx context.Context, q *db.Queries, f db.Firing, st db.Setting, pct int, due Result, now time.Time) error {
-	loc := time.UTC
-	if l, err := time.LoadLocation(st.Timezone); err == nil {
-		loc = l
+// hasResponsibleOwner is true only if the firing has an owner who is still a
+// kiln master. A stale assignment is treated as unclaimed.
+func (r *Runner) hasResponsibleOwner(ctx context.Context, q *db.Queries, f db.Firing) bool {
+	if f.ManagedByUserID == nil {
+		return false
 	}
+	ok, err := q.UserIsKilnMaster(ctx, *f.ManagedByUserID)
+	return err == nil && ok
+}
+
+// responsible returns the DM recipients and the owner's name (empty when the
+// firing is unclaimed).
+func (r *Runner) responsible(ctx context.Context, q *db.Queries, f db.Firing) ([]int64, string, error) {
+	if r.hasResponsibleOwner(ctx, q, f) {
+		name, err := q.GetUserName(ctx, *f.ManagedByUserID)
+		if err != nil {
+			return nil, "", err
+		}
+		return []int64{*f.ManagedByUserID}, name, nil
+	}
+	ids, err := q.ListKilnMasterIDs(ctx)
+	return ids, "", err
+}
+
+func (r *Runner) apply(ctx context.Context, q *db.Queries, f db.Firing, st db.Setting, hasOwner bool, pct int, due Result, now time.Time) error {
+	loc := studioLoc(st.Timezone)
 	url := notify.FiringURL(r.notifyCfg.BaseURL, f.ID)
-	kms, err := q.ListKilnMasterIDs(ctx)
+	responsible, ownerName, err := r.responsible(ctx, q, f)
 	if err != nil {
 		return err
 	}
@@ -172,7 +199,24 @@ func (r *Runner) apply(ctx context.Context, q *db.Queries, f db.Firing, st db.Se
 	}
 	var marks db.MarkJobsDoneParams
 	marks.ID = f.ID
-	batch := notify.Batch{SkipChannel: !due.CloseRequests}
+	batch := notify.Batch{SkipChannel: !(due.CloseRequests || due.AutoCooling)}
+
+	if due.AutoCooling && f.FiringEndsAt != nil {
+		coolingAt := *f.FiringEndsAt
+		if _, err := q.AdvanceFiring(ctx, db.AdvanceFiringParams{
+			ID: f.ID, Status: firing.Cooling, CoolingAt: &coolingAt,
+		}); err != nil {
+			return err
+		}
+		from, to := firing.Firing, firing.Cooling
+		if err := q.InsertEvent(ctx, db.InsertEventParams{
+			FiringID: f.ID, Type: firing.EventStatusChange, FromStatus: &from, ToStatus: &to,
+			OccurredAt: coolingAt, Note: ptr("Cooling automatically after the profile's firing time"),
+			Source: db.EventSourceSystem,
+		}); err != nil {
+			return err
+		}
+	}
 
 	if due.CloseRequests {
 		marks.RequestsCloseHandledAt = &now
@@ -184,34 +228,57 @@ func (r *Runner) apply(ctx context.Context, q *db.Queries, f db.Firing, st db.Se
 		switch {
 		case due.Underfilled:
 			marks.UnderfilledAlertSentAt = &now
-			batch.DM(kms, notify.AlertUnderfilled(f, loc, pct, due.NeedsConfirmation, url))
+			batch.DM(responsible, notify.AlertUnderfilled(f, loc, pct, !hasOwner, url))
 			if err := event(firing.EventAlertSent, "Kiln masters alerted: under-filled with requests closed"); err != nil {
 				return err
 			}
-		case due.NeedsConfirmation:
-			batch.DM(kms, notify.AlertNeedsConfirmation(f, loc, pct, url))
-			if err := event(firing.EventAlertSent, "Kiln masters reminded: needs confirming"); err != nil {
+		case due.NeedsOwner:
+			batch.DM(responsible, notify.AlertNeedsOwner(f, loc, pct, url))
+			if err := event(firing.EventAlertSent, "Kiln masters alerted: needs a kiln master"); err != nil {
 				return err
 			}
 		}
 	}
+
 	if due.MissedStart {
 		marks.MissedStartReminderSentAt = &now
-		batch.DM(kms, notify.AlertMissedStart(f, loc, url))
+		batch.DM(responsible, notify.AlertMissedStart(f, loc, url))
 		if err := event(firing.EventAlertSent, "Kiln masters reminded: not marked started"); err != nil {
+			return err
+		}
+	}
+	if due.MissedStartEscalation {
+		marks.MissedStartEscalatedAt = &now
+		ids, err := q.ListEscalationIDs(ctx)
+		if err != nil {
+			return err
+		}
+		batch.DM(ids, notify.AlertMissedStartEscalation(f, loc, ownerName, url))
+		if err := event(firing.EventAlertSent, "Escalated: firing still not marked started"); err != nil {
 			return err
 		}
 	}
 	if due.MissedUnload {
 		marks.MissedUnloadReminderSentAt = &now
-		batch.DM(kms, notify.AlertMissedUnload(f, loc, url))
+		batch.DM(responsible, notify.AlertMissedUnload(f, loc, url))
 		if err := event(firing.EventAlertSent, "Reminder sent: not marked unloaded"); err != nil {
+			return err
+		}
+	}
+	if due.MissedUnloadEscalation {
+		marks.MissedUnloadEscalatedAt = &now
+		ids, err := q.ListEscalationIDs(ctx)
+		if err != nil {
+			return err
+		}
+		batch.DM(ids, notify.AlertMissedUnloadEscalation(f, loc, ownerName, url))
+		if err := event(firing.EventAlertSent, "Escalated: firing still not marked unloaded"); err != nil {
 			return err
 		}
 	}
 	if due.DayReminder {
 		marks.DayReminderSentAt = &now
-		batch.DM(kms, notify.AlertMorning(f, loc, url))
+		batch.DM(responsible, notify.AlertMorning(f, loc, !hasOwner, url))
 		if err := event(firing.EventAlertSent, "Kiln masters reminded: firing is today"); err != nil {
 			return err
 		}
@@ -220,11 +287,16 @@ func (r *Runner) apply(ctx context.Context, q *db.Queries, f db.Firing, st db.Se
 	if _, err := q.MarkJobsDone(ctx, marks); err != nil {
 		return err
 	}
-	r.log.Info("jobs ran", "firing", f.ID, "close", due.CloseRequests, "underfilled", due.Underfilled,
-		"needs_confirmation", due.NeedsConfirmation, "missed_start", due.MissedStart, "missed_unload", due.MissedUnload,
-		"day_reminder", due.DayReminder)
+	r.log.Info("jobs ran", "firing", f.ID, "auto_cooling", due.AutoCooling, "close", due.CloseRequests,
+		"underfilled", due.Underfilled, "needs_owner", due.NeedsOwner, "missed_start", due.MissedStart,
+		"missed_start_escalation", due.MissedStartEscalation, "missed_unload", due.MissedUnload,
+		"missed_unload_escalation", due.MissedUnloadEscalation, "day_reminder", due.DayReminder)
 	return notify.Enqueue(ctx, q, r.notifyCfg, f.ID, 0, &batch)
 }
+
+func ptr[T any](v T) *T { return &v }
+
+// ── Membership re-check ─────────────────────────────────────────────────────
 
 // cleanup deletes expired sessions and OAuth states. Starting a sign-in needs
 // no login, so without this oauth_states would grow without bound.
@@ -234,7 +306,7 @@ func (r *Runner) cleanup(ctx context.Context) {
 		r.log.Error("deleting expired sessions failed", "error", err)
 	}
 	if err := q.DeleteExpiredOAuthStates(ctx); err != nil {
-		r.log.Error("deleting expired oauth states failed", "error", err)
+		r.log.Error("deleting expired OAuth states failed", "error", err)
 	}
 }
 
@@ -270,6 +342,17 @@ func (r *Runner) RecheckMembers(ctx context.Context) error {
 				continue
 			}
 			r.log.Info("kiln master role changed", "user", a.UserID, "provider", a.Provider, "kiln_master", km)
+		}
+		if !km {
+			// If that was their last KM account, don't leave active firings with a
+			// stale owner: treat them as unclaimed for all notifications and UI.
+			if still, err := q.UserIsKilnMaster(ctx, a.UserID); err != nil {
+				errs = append(errs, err)
+			} else if !still {
+				if err := q.ClearManagedFirings(ctx, &a.UserID); err != nil {
+					errs = append(errs, err)
+				}
+			}
 		}
 		if !m.Member {
 			n, err := q.DeleteUserSessions(ctx, a.UserID)

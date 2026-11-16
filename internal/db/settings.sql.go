@@ -7,7 +7,6 @@ package db
 
 import (
 	"context"
-	"encoding/json"
 )
 
 const countActiveKilns = `-- name: CountActiveKilns :one
@@ -63,6 +62,70 @@ func (q *Queries) CreateKiln(ctx context.Context, arg CreateKilnParams) (Kiln, e
 	return i, err
 }
 
+const createProfile = `-- name: CreateProfile :one
+INSERT INTO firing_profiles (kiln_id, name, firing_type, cone, firing_minutes, cooldown_minutes, active)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, kiln_id, name, firing_type, cone, firing_minutes, cooldown_minutes, active, created_at, updated_at
+`
+
+type CreateProfileParams struct {
+	KilnID          int64  `json:"kiln_id"`
+	Name            string `json:"name"`
+	FiringType      string `json:"firing_type"`
+	Cone            string `json:"cone"`
+	FiringMinutes   int32  `json:"firing_minutes"`
+	CooldownMinutes int32  `json:"cooldown_minutes"`
+	Active          bool   `json:"active"`
+}
+
+func (q *Queries) CreateProfile(ctx context.Context, arg CreateProfileParams) (FiringProfile, error) {
+	row := q.db.QueryRow(ctx, createProfile,
+		arg.KilnID,
+		arg.Name,
+		arg.FiringType,
+		arg.Cone,
+		arg.FiringMinutes,
+		arg.CooldownMinutes,
+		arg.Active,
+	)
+	var i FiringProfile
+	err := row.Scan(
+		&i.ID,
+		&i.KilnID,
+		&i.Name,
+		&i.FiringType,
+		&i.Cone,
+		&i.FiringMinutes,
+		&i.CooldownMinutes,
+		&i.Active,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const deactivateProfile = `-- name: DeactivateProfile :one
+UPDATE firing_profiles SET active = false, updated_at = now() WHERE id = $1 RETURNING id, kiln_id, name, firing_type, cone, firing_minutes, cooldown_minutes, active, created_at, updated_at
+`
+
+func (q *Queries) DeactivateProfile(ctx context.Context, id int64) (FiringProfile, error) {
+	row := q.db.QueryRow(ctx, deactivateProfile, id)
+	var i FiringProfile
+	err := row.Scan(
+		&i.ID,
+		&i.KilnID,
+		&i.Name,
+		&i.FiringType,
+		&i.Cone,
+		&i.FiringMinutes,
+		&i.CooldownMinutes,
+		&i.Active,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getKiln = `-- name: GetKiln :one
 SELECT id, name, interior_width_in, interior_depth_in, interior_height_in, shelf_count, share_per_shelf_pct, active, created_at, updated_at FROM kilns WHERE id = $1
 `
@@ -85,8 +148,30 @@ func (q *Queries) GetKiln(ctx context.Context, id int64) (Kiln, error) {
 	return i, err
 }
 
+const getProfile = `-- name: GetProfile :one
+SELECT id, kiln_id, name, firing_type, cone, firing_minutes, cooldown_minutes, active, created_at, updated_at FROM firing_profiles WHERE id = $1
+`
+
+func (q *Queries) GetProfile(ctx context.Context, id int64) (FiringProfile, error) {
+	row := q.db.QueryRow(ctx, getProfile, id)
+	var i FiringProfile
+	err := row.Scan(
+		&i.ID,
+		&i.KilnID,
+		&i.Name,
+		&i.FiringType,
+		&i.Cone,
+		&i.FiringMinutes,
+		&i.CooldownMinutes,
+		&i.Active,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getSettings = `-- name: GetSettings :one
-SELECT id, timezone, min_notice_hours, request_cutoff_hours, underfilled_threshold_pct, firing_types, cones, programs, discord_channel_id, slack_channel_id, missed_start_grace_minutes, missed_unload_grace_minutes, public_page_days_ahead, updated_at, day_reminder_hour FROM settings WHERE id = 1
+SELECT id, timezone, min_notice_hours, request_cutoff_hours, underfilled_threshold_pct, firing_types, cones, discord_channel_id, slack_channel_id, missed_start_grace_minutes, missed_unload_grace_minutes, escalation_grace_minutes, day_reminder_hour, public_page_days_ahead, updated_at FROM settings WHERE id = 1
 `
 
 func (q *Queries) GetSettings(ctx context.Context) (Setting, error) {
@@ -100,22 +185,60 @@ func (q *Queries) GetSettings(ctx context.Context) (Setting, error) {
 		&i.UnderfilledThresholdPct,
 		&i.FiringTypes,
 		&i.Cones,
-		&i.Programs,
 		&i.DiscordChannelID,
 		&i.SlackChannelID,
 		&i.MissedStartGraceMinutes,
 		&i.MissedUnloadGraceMinutes,
+		&i.EscalationGraceMinutes,
+		&i.DayReminderHour,
 		&i.PublicPageDaysAhead,
 		&i.UpdatedAt,
-		&i.DayReminderHour,
 	)
 	return i, err
 }
 
+const listActiveProfiles = `-- name: ListActiveProfiles :many
+SELECT id, kiln_id, name, firing_type, cone, firing_minutes, cooldown_minutes, active, created_at, updated_at FROM firing_profiles WHERE active ORDER BY kiln_id, lower(name), id
+`
+
+// Profiles a proposer can choose from, grouped by kiln.
+func (q *Queries) ListActiveProfiles(ctx context.Context) ([]FiringProfile, error) {
+	rows, err := q.db.Query(ctx, listActiveProfiles)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []FiringProfile
+	for rows.Next() {
+		var i FiringProfile
+		if err := rows.Scan(
+			&i.ID,
+			&i.KilnID,
+			&i.Name,
+			&i.FiringType,
+			&i.Cone,
+			&i.FiringMinutes,
+			&i.CooldownMinutes,
+			&i.Active,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listKilns = `-- name: ListKilns :many
+
 SELECT id, name, interior_width_in, interior_depth_in, interior_height_in, shelf_count, share_per_shelf_pct, active, created_at, updated_at FROM kilns ORDER BY active DESC, id
 `
 
+// ── Kilns ───────────────────────────────────────────────────────────────────
 // Active kilns first; inactive ones are kept so old firings still show their kiln.
 func (q *Queries) ListKilns(ctx context.Context) ([]Kiln, error) {
 	rows, err := q.db.Query(ctx, listKilns)
@@ -134,6 +257,44 @@ func (q *Queries) ListKilns(ctx context.Context) ([]Kiln, error) {
 			&i.InteriorHeightIn,
 			&i.ShelfCount,
 			&i.SharePerShelfPct,
+			&i.Active,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listProfiles = `-- name: ListProfiles :many
+
+SELECT id, kiln_id, name, firing_type, cone, firing_minutes, cooldown_minutes, active, created_at, updated_at FROM firing_profiles ORDER BY kiln_id, lower(name), id
+`
+
+// ── Firing profiles ─────────────────────────────────────────────────────────
+// Every profile, active or not, for the admin editor.
+func (q *Queries) ListProfiles(ctx context.Context) ([]FiringProfile, error) {
+	rows, err := q.db.Query(ctx, listProfiles)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []FiringProfile
+	for rows.Next() {
+		var i FiringProfile
+		if err := rows.Scan(
+			&i.ID,
+			&i.KilnID,
+			&i.Name,
+			&i.FiringType,
+			&i.Cone,
+			&i.FiringMinutes,
+			&i.CooldownMinutes,
 			&i.Active,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -200,6 +361,58 @@ func (q *Queries) UpdateKiln(ctx context.Context, arg UpdateKilnParams) (Kiln, e
 	return i, err
 }
 
+const updateProfile = `-- name: UpdateProfile :one
+UPDATE firing_profiles
+SET kiln_id = $1,
+    name = $2,
+    firing_type = $3,
+    cone = $4,
+    firing_minutes = $5,
+    cooldown_minutes = $6,
+    active = $7,
+    updated_at = now()
+WHERE id = $8
+RETURNING id, kiln_id, name, firing_type, cone, firing_minutes, cooldown_minutes, active, created_at, updated_at
+`
+
+type UpdateProfileParams struct {
+	KilnID          int64  `json:"kiln_id"`
+	Name            string `json:"name"`
+	FiringType      string `json:"firing_type"`
+	Cone            string `json:"cone"`
+	FiringMinutes   int32  `json:"firing_minutes"`
+	CooldownMinutes int32  `json:"cooldown_minutes"`
+	Active          bool   `json:"active"`
+	ID              int64  `json:"id"`
+}
+
+func (q *Queries) UpdateProfile(ctx context.Context, arg UpdateProfileParams) (FiringProfile, error) {
+	row := q.db.QueryRow(ctx, updateProfile,
+		arg.KilnID,
+		arg.Name,
+		arg.FiringType,
+		arg.Cone,
+		arg.FiringMinutes,
+		arg.CooldownMinutes,
+		arg.Active,
+		arg.ID,
+	)
+	var i FiringProfile
+	err := row.Scan(
+		&i.ID,
+		&i.KilnID,
+		&i.Name,
+		&i.FiringType,
+		&i.Cone,
+		&i.FiringMinutes,
+		&i.CooldownMinutes,
+		&i.Active,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const updateSettings = `-- name: UpdateSettings :one
 UPDATE settings
 SET timezone = $1,
@@ -208,32 +421,32 @@ SET timezone = $1,
     underfilled_threshold_pct = $4,
     firing_types = $5,
     cones = $6,
-    programs = $7,
-    discord_channel_id = $8,
-    slack_channel_id = $9,
-    missed_start_grace_minutes = $10,
-    missed_unload_grace_minutes = $11,
+    discord_channel_id = $7,
+    slack_channel_id = $8,
+    missed_start_grace_minutes = $9,
+    missed_unload_grace_minutes = $10,
+    escalation_grace_minutes = $11,
     day_reminder_hour = $12,
     public_page_days_ahead = $13,
     updated_at = now()
 WHERE id = 1
-RETURNING id, timezone, min_notice_hours, request_cutoff_hours, underfilled_threshold_pct, firing_types, cones, programs, discord_channel_id, slack_channel_id, missed_start_grace_minutes, missed_unload_grace_minutes, public_page_days_ahead, updated_at, day_reminder_hour
+RETURNING id, timezone, min_notice_hours, request_cutoff_hours, underfilled_threshold_pct, firing_types, cones, discord_channel_id, slack_channel_id, missed_start_grace_minutes, missed_unload_grace_minutes, escalation_grace_minutes, day_reminder_hour, public_page_days_ahead, updated_at
 `
 
 type UpdateSettingsParams struct {
-	Timezone                 string          `json:"timezone"`
-	MinNoticeHours           int32           `json:"min_notice_hours"`
-	RequestCutoffHours       int32           `json:"request_cutoff_hours"`
-	UnderfilledThresholdPct  int32           `json:"underfilled_threshold_pct"`
-	FiringTypes              []string        `json:"firing_types"`
-	Cones                    []string        `json:"cones"`
-	Programs                 json.RawMessage `json:"programs"`
-	DiscordChannelID         string          `json:"discord_channel_id"`
-	SlackChannelID           string          `json:"slack_channel_id"`
-	MissedStartGraceMinutes  int32           `json:"missed_start_grace_minutes"`
-	MissedUnloadGraceMinutes int32           `json:"missed_unload_grace_minutes"`
-	DayReminderHour          int32           `json:"day_reminder_hour"`
-	PublicPageDaysAhead      int32           `json:"public_page_days_ahead"`
+	Timezone                 string   `json:"timezone"`
+	MinNoticeHours           int32    `json:"min_notice_hours"`
+	RequestCutoffHours       int32    `json:"request_cutoff_hours"`
+	UnderfilledThresholdPct  int32    `json:"underfilled_threshold_pct"`
+	FiringTypes              []string `json:"firing_types"`
+	Cones                    []string `json:"cones"`
+	DiscordChannelID         string   `json:"discord_channel_id"`
+	SlackChannelID           string   `json:"slack_channel_id"`
+	MissedStartGraceMinutes  int32    `json:"missed_start_grace_minutes"`
+	MissedUnloadGraceMinutes int32    `json:"missed_unload_grace_minutes"`
+	EscalationGraceMinutes   int32    `json:"escalation_grace_minutes"`
+	DayReminderHour          int32    `json:"day_reminder_hour"`
+	PublicPageDaysAhead      int32    `json:"public_page_days_ahead"`
 }
 
 func (q *Queries) UpdateSettings(ctx context.Context, arg UpdateSettingsParams) (Setting, error) {
@@ -244,11 +457,11 @@ func (q *Queries) UpdateSettings(ctx context.Context, arg UpdateSettingsParams) 
 		arg.UnderfilledThresholdPct,
 		arg.FiringTypes,
 		arg.Cones,
-		arg.Programs,
 		arg.DiscordChannelID,
 		arg.SlackChannelID,
 		arg.MissedStartGraceMinutes,
 		arg.MissedUnloadGraceMinutes,
+		arg.EscalationGraceMinutes,
 		arg.DayReminderHour,
 		arg.PublicPageDaysAhead,
 	)
@@ -261,14 +474,14 @@ func (q *Queries) UpdateSettings(ctx context.Context, arg UpdateSettingsParams) 
 		&i.UnderfilledThresholdPct,
 		&i.FiringTypes,
 		&i.Cones,
-		&i.Programs,
 		&i.DiscordChannelID,
 		&i.SlackChannelID,
 		&i.MissedStartGraceMinutes,
 		&i.MissedUnloadGraceMinutes,
+		&i.EscalationGraceMinutes,
+		&i.DayReminderHour,
 		&i.PublicPageDaysAhead,
 		&i.UpdatedAt,
-		&i.DayReminderHour,
 	)
 	return i, err
 }
