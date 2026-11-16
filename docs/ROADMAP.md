@@ -8,7 +8,7 @@ questions live in [DECISIONS.md](DECISIONS.md).
 
 Legend: ✅ done & tested · 🟡 partial · ⬜ not started · 🚫 blocked on owner
 
-_Last updated: 2026-11-11, end of M4 (signed off). M3 committed as `c6a2634`. v1 is now code complete. What's left is owner-blocked (real OAuth apps, bots, staging, phone checks)._
+_Last updated: 2026-11-16, firing ownership + profiles (branch `feature/firing-ownership-profiles`). The pre-prod schema was reset to one clean baseline; see the note below. M4/v1 remains code-complete; real OAuth apps, bots, staging and phone checks are still owner-blocked._
 
 _Post-M4 owner testing changes: unloaded, ready for pickup and completed merged into one `completed` step (migration 004, [DECISIONS](DECISIONS.md) #13). Also: firings are booked by day, not start time (migration 005, [DECISIONS](DECISIONS.md) #14), and the loader role is gone: anyone signed in can say they've loaded or unloaded (migration 006, #15). The owner has more changes to come._
 
@@ -17,6 +17,8 @@ _2026-11-14 UI refresh: the **Kiln Control** design system is applied across the
 _2026-11-14 post-v1 additions (branch `feature/km-alerts-and-blackouts`): new firing requests DM every kiln master (D49); a day-of reminder fires once at an admin-set hour (default 8am studio time) on each firing's day (D50, migration 007); admins can black out date ranges per kiln for maintenance, a hard block for everyone with no override, gating new proposals and reschedules only (D51, migration 008). Unit + integration tested; `make test`, `go vet` and `tsc` green._
 
 _2026-11-14 UI declutter (branch `ui-clutter`, not yet merged): firing page consolidated (one Actions section; program/times + timeline folded into a collapsed History; hold/cancel reasons as header captions), home button bank trimmed to Propose + Admin, "Recently finished" capped at 3, ShareInput is presets-only (no slider), fullness meters show one number (room-left on the public page), plate heads flattened, admin index gated to admins (was an empty page for kiln masters), settings groups collapsed into disclosures. Home is one soonest-first list (no "mine" vs "upcoming" split; firings you're in get a highlighted plate), "Recently finished" is a collapsed disclosure, and firing cards list who's in under the meter, each with its share (`ListFiringParticipants`). Cards no longer print "by &lt;proposer&gt;"; the name list carries it._
+
+_2026-11-16 firing ownership + profiles (branch `feature/firing-ownership-profiles`): the pre-prod schema was reset to a single clean baseline. Firing profiles are per kiln (name, type, cone, rough firing/cooldown times) and chosen by the proposer, with an **Other** custom option. Confirm is replaced by **Take this firing** (`managed_by_user_id`); routine alerts go only to the owner, or all KMs while unclaimed, with missed-start/unload escalation. Cooling is automatic at `started_at + firing_minutes`; "ready to unload" is derived from the profile's cooldown; anyone can unload early. Loading/loaded and the redundant unloaded/ready timestamps are gone. **No data migration** — `make db-reset` is required. See [DECISIONS](DECISIONS.md) D52–D57._
 
 
 ---
