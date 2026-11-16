@@ -365,7 +365,7 @@ type claimInput struct {
 
 func (s *Server) handleClaim(w http.ResponseWriter, r *http.Request) {
 	var in claimInput
-	if !s.readJSON(w, r, &in) {
+	if !s.readOptionalJSON(w, r, &in) {
 		return
 	}
 	s.mutateFiring(w, r, func(ctx context.Context, q *db.Queries, f db.Firing, u *currentUser, n *notify.Batch) ([]string, error) {

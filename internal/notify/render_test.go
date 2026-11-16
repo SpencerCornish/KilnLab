@@ -14,14 +14,16 @@ var denver, _ = time.LoadLocation("America/Denver")
 func sampleFiring() db.Firing {
 	start := time.Date(2026, 11, 12, 16, 0, 0, 0, time.UTC) // Thu 9:00am Denver
 	return db.Firing{
-		ID: 7, FiringType: "glaze", Cone: "6", ScheduledDate: time.Date(2026, 11, 12, 0, 0, 0, 0, time.UTC), Status: firing.Proposed,
-		ProposerSharePct: 30, RequestsCloseAt: start.Add(-12 * time.Hour),
+		ID: 7, Title: "Cone 6 Glaze", FiringType: "glaze", Cone: "6",
+		ScheduledDate: time.Date(2026, 11, 12, 0, 0, 0, 0, time.UTC), Status: firing.Proposed,
+		ProposerSharePct: 30, FiringMinutes: 480, CooldownMinutes: 720,
+		RequestsCloseAt: start.Add(-12 * time.Hour),
 	}
 }
 
 func render(f db.Firing, approved int, full firing.Fullness, now time.Time) Card {
-	return RenderCard(CardInput{Firing: f, ProposerName: "Cody", ApprovedCount: approved, Fullness: full,
-		Now: now, Loc: denver, BaseURL: "https://kiln.example"})
+	return RenderCard(CardInput{Firing: f, ProposerName: "Cody", OwnerName: "Kim", ApprovedCount: approved,
+		Fullness: full, Now: now, Loc: denver, BaseURL: "https://kiln.example"})
 }
 
 func TestRenderProposed(t *testing.T) {
@@ -30,6 +32,7 @@ func TestRenderProposed(t *testing.T) {
 	want := []string{
 		"Status: Proposed · ~75% full · room for ~25%",
 		"Proposed by Cody · 3 participants",
+		"Run by Kim",
 		"Requests close Wed Nov 11, 9:00pm",
 	}
 	if c.Title != "🔥 Cone 6 Glaze — Thu Nov 12" {
@@ -48,17 +51,28 @@ func TestRenderVariants(t *testing.T) {
 	now := f.RequestsCloseAt.Add(12 * time.Hour)
 	reason := "not enough work"
 	started := f.RequestsCloseAt.Add(12 * time.Hour).Add(15 * time.Minute)
-	unload := started.Add(30 * time.Hour)
+	firingEnds := started.Add(8 * time.Hour)
+	unloadable := firingEnds.Add(12 * time.Hour)
 	cases := []struct {
 		mut   func(*db.Firing)
 		first string
 	}{
 		{func(f *db.Firing) { f.Status = firing.OnHold; f.HoldReason = &reason }, "⏸ Waiting for more work — not enough work"},
-		{func(f *db.Firing) { f.Status = firing.Firing; f.StartedAt = &started; f.EstimatedUnloadAt = &unload },
-			"Firing now · started 9:15am · est. unload Fri 3:15pm"},
+		{func(f *db.Firing) {
+			f.Status = firing.Firing
+			f.StartedAt = &started
+			f.FiringEndsAt = &firingEnds
+			f.UnloadableAt = &unloadable
+		}, "Firing now · started 9:15am · est. cool Thu 5:15pm · ready to unload Fri 5:15am"},
+		{func(f *db.Firing) {
+			f.Status = firing.Cooling
+			f.StartedAt = &started
+			f.FiringEndsAt = &firingEnds
+			f.UnloadableAt = &unloadable
+		}, "Cooling · ready to unload Fri 5:15am"},
 		{func(f *db.Firing) { f.Status = firing.Completed }, "✅ Ready for pickup"},
 		{func(f *db.Firing) { f.Status = firing.Cancelled; f.CancelReason = &reason }, "❌ Cancelled — not enough work"},
-		{func(f *db.Firing) { f.Status = firing.Loading }, "Status: Loading"},
+		{func(f *db.Firing) { f.Status = firing.Scheduled }, "Status: Scheduled · ~30% full · room for ~70%"},
 	}
 	for _, c := range cases {
 		ff := f
@@ -81,6 +95,16 @@ func TestRenderVariants(t *testing.T) {
 	}
 }
 
+func TestRenderUnclaimed(t *testing.T) {
+	f := sampleFiring()
+	c := RenderCard(CardInput{Firing: f, ProposerName: "Cody", ApprovedCount: 0,
+		Fullness: firing.Fullness{Display: 30, RoomLeft: 70}, Now: f.RequestsCloseAt.Add(-time.Hour),
+		Loc: denver, BaseURL: "https://kiln.example"})
+	if !strings.Contains(strings.Join(c.Lines, "\n"), "Needs a kiln master") {
+		t.Errorf("lines = %v", c.Lines)
+	}
+}
+
 func TestCardHash(t *testing.T) {
 	f := sampleFiring()
 	now := f.RequestsCloseAt.Add(12 * time.Hour).Add(-48 * time.Hour)
@@ -100,8 +124,7 @@ func TestTitleAndDescribe(t *testing.T) {
 	if Describe(f, denver) != "Cone 6 Glaze (Thu Nov 12)" {
 		t.Errorf("describe = %q", Describe(f, denver))
 	}
-	title := "Holiday mugs"
-	f.Title = &title
+	f.Title = "Holiday mugs"
 	if Title(f) != "Holiday mugs" {
 		t.Errorf("title = %q", Title(f))
 	}
@@ -120,7 +143,7 @@ func TestBackoff(t *testing.T) {
 // Slack only carries colour on legacy attachments, so the card's blocks ride
 // inside one whose `color` is the status colour Discord already gets.
 func TestSlackCardColor(t *testing.T) {
-	c := Card{Title: "Cone 6 Glaze", Lines: []string{"Status: Confirmed"}, URL: "https://k/f/1", Color: statusColors[firing.Confirmed]}
+	c := Card{Title: "Cone 6 Glaze", Lines: []string{"Status: Scheduled"}, URL: "https://k/f/1", Color: statusColors[firing.Scheduled]}
 	att := slackAttachments(c)[0].(map[string]any)
 	if att["color"] != "#15803d" {
 		t.Errorf("attachment color = %v", att["color"])
@@ -128,7 +151,7 @@ func TestSlackCardColor(t *testing.T) {
 	if blocks, ok := att["blocks"].([]any); !ok || len(blocks) != 2 {
 		t.Errorf("attachment blocks = %v", att["blocks"])
 	}
-	if att["fallback"] != "Cone 6 Glaze\nStatus: Confirmed\nhttps://k/f/1" {
+	if att["fallback"] != "Cone 6 Glaze\nStatus: Scheduled\nhttps://k/f/1" {
 		t.Errorf("attachment fallback = %q", att["fallback"])
 	}
 	// A card with no colour (never sent today) must not paint a black bar.

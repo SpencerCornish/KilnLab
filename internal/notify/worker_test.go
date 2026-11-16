@@ -137,7 +137,8 @@ func newEnv(t *testing.T) *env {
 	e.userID = mk("Cody", "artlab", "discord", "D-USER")
 	e.slackID = mk("Bea", "bms", "slack", "U-BEA")
 	e.firing, err = e.q.CreateFiring(ctx, db.CreateFiringParams{
-		KilnID: 1, ProposedByUserID: e.userID, FiringType: "glaze", Cone: "6", ScheduledDate: firing.DayOf(e.now.Add(72*time.Hour), time.UTC),
+		KilnID: 1, ProposedByUserID: e.userID, FiringType: "glaze", Cone: "6", Title: "Cone 6 Glaze",
+		ScheduledDate: firing.DayOf(e.now.Add(72*time.Hour), time.UTC), FiringMinutes: 480, CooldownMinutes: 720,
 		ProposerDescription: "mugs", ProposerSharePct: 40, ProposerCone: "6", RequestsCloseAt: e.now.Add(60 * time.Hour),
 	})
 	if err != nil {
@@ -187,7 +188,7 @@ func TestChannelMessageCreatedThenEditedInPlace(t *testing.T) {
 	equal(t, "slack unchanged", e.slack.take(), nil)
 
 	// A change edits the same message.
-	if _, err := e.q.SetFiringStatus(ctx, db.SetFiringStatusParams{ID: e.firing.ID, Status: firing.Confirmed}); err != nil {
+	if _, err := e.q.SetFiringStatus(ctx, db.SetFiringStatusParams{ID: e.firing.ID, Status: firing.Scheduled}); err != nil {
 		t.Fatal(err)
 	}
 	e.enqueue(t, &Batch{}, e.userID)
@@ -309,7 +310,7 @@ func TestDeletedMessageIsReposted(t *testing.T) {
 	e.discord.take()
 
 	ctx := context.Background()
-	if _, err := e.q.SetFiringStatus(ctx, db.SetFiringStatusParams{ID: e.firing.ID, Status: firing.Confirmed}); err != nil {
+	if _, err := e.q.SetFiringStatus(ctx, db.SetFiringStatusParams{ID: e.firing.ID, Status: firing.Scheduled}); err != nil {
 		t.Fatal(err)
 	}
 	e.discord.handler = func(w http.ResponseWriter, r *http.Request, _ map[string]any) {

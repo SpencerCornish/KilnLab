@@ -35,6 +35,14 @@ const maxJSONBodyBytes = 1 << 20
 
 // readJSON decodes a single JSON object, rejecting unknown fields and trailing data.
 // It writes the error response itself and returns false on failure.
+// readOptionalJSON accepts an empty body (Content-Length 0) as an empty struct.
+func (s *Server) readOptionalJSON(w http.ResponseWriter, r *http.Request, v any) bool {
+	if r.ContentLength == 0 {
+		return true
+	}
+	return s.readJSON(w, r, v)
+}
+
 func (s *Server) readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
 	dec := json.NewDecoder(r.Body)

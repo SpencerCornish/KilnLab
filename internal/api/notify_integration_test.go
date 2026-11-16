@@ -79,8 +79,7 @@ func TestActionsEnqueueNotifications(t *testing.T) {
 	}
 	aliceID, bobID, carolID, kimID := id(alice), id(bob), id(carol), id(km)
 
-	d := alice.mustDo("POST", "/api/firings", map[string]any{"firing_type": "glaze", "cone": "6",
-		"scheduled_date": dayOf(e.now.Add(72 * time.Hour)), "description": "mugs", "share_pct": 30}, http.StatusCreated)
+	d := alice.mustDo("POST", "/api/firings", firingBody("glaze", "6", dayOf(e.now.Add(72*time.Hour)), "mugs", 30), http.StatusCreated)
 	base := fmt.Sprintf("/api/firings/%d", int64(jget(d, "firing", "id").(float64)))
 	rows := drainOutbox(t, pool)
 	if len(rows) != 2 || rows[0].kind != "channel_upsert" { // one main message per platform
@@ -131,9 +130,9 @@ func TestActionsEnqueueNotifications(t *testing.T) {
 
 	// Decline Carol, then run the firing: start → thread; ready → DMs only to approved + proposer.
 	km.mustDo("POST", fmt.Sprintf("%s/requests/%d/decide", base, carolReq), map[string]any{"decision": "decline"}, http.StatusOK)
-	km.mustDo("POST", base+"/confirm", nil, http.StatusOK)
+	km.mustDo("POST", base+"/claim", nil, http.StatusOK)
 	drainOutbox(t, pool)
-	km.mustDo("POST", base+"/status", map[string]any{"to": "firing", "program": "Glaze", "estimated_duration_minutes": 600}, http.StatusOK)
+	km.mustDo("POST", base+"/status", map[string]any{"to": "firing"}, http.StatusOK)
 	if th := threadOf(drainOutbox(t, pool)); th == "" {
 		t.Fatal("start should post a thread reply")
 	}
@@ -144,8 +143,7 @@ func TestActionsEnqueueNotifications(t *testing.T) {
 	}
 
 	// The actor isn't DMed: Alice (proposer) cancelling isn't possible, so check a KM-proposed firing.
-	d = km.mustDo("POST", "/api/firings", map[string]any{"firing_type": "bisque", "cone": "04",
-		"scheduled_date": dayOf(e.now.Add(72 * time.Hour)), "description": "x", "share_pct": 10}, http.StatusCreated)
+	d = km.mustDo("POST", "/api/firings", firingBody("bisque", "04", dayOf(e.now.Add(72*time.Hour)), "x", 10), http.StatusCreated)
 	base2 := fmt.Sprintf("/api/firings/%d", int64(jget(d, "firing", "id").(float64)))
 	bob.mustDo("POST", base2+"/requests", map[string]any{"description": "y", "share_pct": 10, "cone": "04"}, http.StatusOK)
 	drainOutbox(t, pool)

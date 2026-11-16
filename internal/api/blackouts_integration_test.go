@@ -39,8 +39,7 @@ func TestBlackouts(t *testing.T) {
 
 	// Nobody can book the blocked day, not even a kiln master.
 	proposal := func(day string) map[string]any {
-		return map[string]any{"firing_type": "glaze", "cone": "6", "scheduled_date": day,
-			"description": "mugs", "share_pct": 20}
+		return firingBody("glaze", "6", day, "mugs", 20)
 	}
 	alice.mustDo("POST", "/api/firings", proposal(blockedDay), http.StatusConflict)
 	km.mustDo("POST", "/api/firings", proposal(blockedDay), http.StatusConflict)
