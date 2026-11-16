@@ -12,5 +12,5 @@ FROM firings f
 WHERE f.status::text = ANY (sqlc.arg(statuses)::text[])
   AND f.scheduled_date <= sqlc.arg(until)
   AND (f.scheduled_date >= sqlc.arg(since)
-       OR f.status IN ('loading', 'loaded', 'firing', 'cooling'))
+       OR f.status IN ('firing', 'cooling'))
 ORDER BY f.scheduled_date, f.id;

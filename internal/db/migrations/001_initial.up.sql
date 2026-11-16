@@ -1,11 +1,13 @@
--- KilnLab initial schema (v1). All timestamps are UTC (timestamptz); display in settings.timezone.
+-- KilnLab clean schema baseline.
+--
+-- The app is pre-production; this baseline replaces the old incremental
+-- migrations. All timestamps are UTC (timestamptz); display in settings.timezone.
 
 CREATE TYPE community AS ENUM ('artlab', 'bms');
 CREATE TYPE auth_provider AS ENUM ('discord', 'slack');
 
 CREATE TYPE firing_status AS ENUM (
-    'proposed', 'on_hold', 'confirmed', 'loading', 'loaded',
-    'firing', 'cooling', 'unloaded', 'ready_for_pickup', 'completed', 'cancelled'
+    'proposed', 'scheduled', 'on_hold', 'firing', 'cooling', 'completed', 'cancelled'
 );
 
 CREATE TYPE request_status AS ENUM ('pending', 'approved', 'declined', 'withdrawn');
@@ -18,14 +20,13 @@ CREATE TYPE outbox_status AS ENUM ('pending', 'sent', 'failed');
 -- users is separate from accounts so account linking (same person on Discord
 -- and Slack) can be added later without a data migration.
 CREATE TABLE users (
-    id             BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    display_name   TEXT        NOT NULL,
-    avatar_url     TEXT,
-    community      community   NOT NULL,
-    is_self_loader BOOLEAN     NOT NULL DEFAULT false,
-    is_admin       BOOLEAN     NOT NULL DEFAULT false,
-    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-    last_login_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    display_name  TEXT        NOT NULL,
+    avatar_url    TEXT,
+    community     community   NOT NULL,
+    is_admin      BOOLEAN     NOT NULL DEFAULT false,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_login_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE accounts (
@@ -63,7 +64,7 @@ CREATE TABLE oauth_states (
     created_at   TIMESTAMPTZ   NOT NULL DEFAULT now()
 );
 
--- ── Kilns & settings ────────────────────────────────────────────────────────
+-- ── Kilns, profiles & settings ──────────────────────────────────────────────
 
 CREATE TABLE kilns (
     id                  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -80,6 +81,23 @@ CREATE TABLE kilns (
 
 INSERT INTO kilns (name) VALUES ('Studio kiln');
 
+-- A firing preset belonging to one kiln. The name is the firing's display name,
+-- and the times are rough estimates used to schedule firing/cooling phases.
+CREATE TABLE firing_profiles (
+    id               BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    kiln_id          BIGINT      NOT NULL REFERENCES kilns (id) ON DELETE CASCADE,
+    name             TEXT        NOT NULL,
+    firing_type      TEXT        NOT NULL,
+    cone             TEXT        NOT NULL,
+    firing_minutes   INTEGER     NOT NULL CHECK (firing_minutes > 0),
+    cooldown_minutes INTEGER     NOT NULL CHECK (cooldown_minutes >= 0),
+    active           BOOLEAN     NOT NULL DEFAULT true,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (kiln_id, name)
+);
+CREATE INDEX firing_profiles_kiln_active_idx ON firing_profiles (kiln_id) WHERE active;
+
 CREATE TABLE settings (
     id                          INTEGER     PRIMARY KEY DEFAULT 1 CHECK (id = 1),
     timezone                    TEXT        NOT NULL DEFAULT 'America/Denver',
@@ -88,17 +106,33 @@ CREATE TABLE settings (
     underfilled_threshold_pct   INTEGER     NOT NULL DEFAULT 50 CHECK (underfilled_threshold_pct BETWEEN 0 AND 100),
     firing_types                TEXT[]      NOT NULL DEFAULT ARRAY['bisque', 'glaze', 'other'],
     cones                       TEXT[]      NOT NULL DEFAULT ARRAY['022', '018', '010', '06', '04', '5', '6', '10'],
-    -- [{"name": "Slow Glaze", "default_duration_minutes": 600}, ...]
-    programs                    JSONB       NOT NULL DEFAULT '[]'::jsonb,
     discord_channel_id          TEXT        NOT NULL DEFAULT '',
     slack_channel_id            TEXT        NOT NULL DEFAULT '',
     missed_start_grace_minutes  INTEGER     NOT NULL DEFAULT 120 CHECK (missed_start_grace_minutes >= 0),
     missed_unload_grace_minutes INTEGER     NOT NULL DEFAULT 180 CHECK (missed_unload_grace_minutes >= 0),
+    escalation_grace_minutes    INTEGER     NOT NULL DEFAULT 120 CHECK (escalation_grace_minutes >= 0),
+    day_reminder_hour           INTEGER     NOT NULL DEFAULT 8 CHECK (day_reminder_hour BETWEEN 0 AND 23),
     public_page_days_ahead      INTEGER     NOT NULL DEFAULT 30 CHECK (public_page_days_ahead > 0),
     updated_at                  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 INSERT INTO settings (id) VALUES (1);
+
+-- Admin-only kiln date blackouts: maintenance and other reasons a kiln can't
+-- take new firings. start_date/end_date are inclusive studio calendar days.
+-- Blackouts gate new proposals and reschedules; they never cancel an existing
+-- firing. Every kiln can be blacked out independently.
+CREATE TABLE kiln_blackouts (
+    id         BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    kiln_id    BIGINT      NOT NULL REFERENCES kilns (id) ON DELETE CASCADE,
+    start_date DATE        NOT NULL,
+    end_date   DATE        NOT NULL,
+    reason     TEXT        NOT NULL DEFAULT '',
+    created_by BIGINT      REFERENCES users (id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK (end_date >= start_date)
+);
+CREATE INDEX kiln_blackouts_kiln_date_idx ON kiln_blackouts (kiln_id, start_date, end_date);
 
 -- ── Firings ─────────────────────────────────────────────────────────────────
 
@@ -106,40 +140,50 @@ CREATE TABLE firings (
     id                             BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     kiln_id                        BIGINT        NOT NULL REFERENCES kilns (id),
     proposed_by_user_id            BIGINT        NOT NULL REFERENCES users (id),
+    -- The kiln master who took responsibility for this firing.
+    managed_by_user_id             BIGINT        REFERENCES users (id) ON DELETE SET NULL,
+    assigned_at                    TIMESTAMPTZ,
+    profile_id                     BIGINT        REFERENCES firing_profiles (id) ON DELETE SET NULL,
     firing_type                    TEXT          NOT NULL,
     cone                           TEXT          NOT NULL,
-    title                          TEXT,
+    -- Snapshot of the profile/custom name; kept if the profile changes later.
+    title                          TEXT          NOT NULL,
     notes                          TEXT          NOT NULL DEFAULT '',
-    scheduled_start                TIMESTAMPTZ   NOT NULL,
+    scheduled_date                 DATE          NOT NULL, -- the day; no start time is promised
     status                         firing_status NOT NULL DEFAULT 'proposed',
-    -- Set when a firing is held, so release can return to confirmed if it had been.
-    was_confirmed                  BOOLEAN       NOT NULL DEFAULT false,
+    -- Set when a firing is held, so release can return to scheduled if it had been.
+    was_scheduled                  BOOLEAN       NOT NULL DEFAULT false,
     hold_reason                    TEXT,
     cancel_reason                  TEXT,
     proposer_description           TEXT          NOT NULL,
     proposer_share_pct             INTEGER       NOT NULL CHECK (proposer_share_pct BETWEEN 1 AND 100),
     proposer_cone                  TEXT          NOT NULL,
     proposer_clay_body             TEXT,
-    fullness_override_pct          INTEGER CHECK (fullness_override_pct BETWEEN 0 AND 100),
+    fullness_override_pct          INTEGER       CHECK (fullness_override_pct BETWEEN 0 AND 100),
     requests_close_at              TIMESTAMPTZ   NOT NULL,
     requests_closed_manually       BOOLEAN       NOT NULL DEFAULT false,
-    loader_user_id                 BIGINT REFERENCES users (id),
-    program                        TEXT,
-    estimated_duration_minutes     INTEGER CHECK (estimated_duration_minutes > 0),
+    -- Snapshot of the firing profile's rough timings.
+    firing_minutes                 INTEGER       NOT NULL CHECK (firing_minutes > 0),
+    cooldown_minutes               INTEGER       NOT NULL CHECK (cooldown_minutes >= 0),
     started_at                     TIMESTAMPTZ,
-    estimated_unload_at            TIMESTAMPTZ,
+    firing_ends_at                 TIMESTAMPTZ, -- estimated start + firing_minutes
+    unloadable_at                  TIMESTAMPTZ, -- estimated firing_ends_at + cooldown_minutes
     cooling_at                     TIMESTAMPTZ,
-    unloaded_at                    TIMESTAMPTZ,
-    ready_for_pickup_at            TIMESTAMPTZ,
-    completed_at                   TIMESTAMPTZ,
+    unloaded_at                    TIMESTAMPTZ, -- completed: unloaded and ready for pickup
     underfilled_alert_sent_at      TIMESTAMPTZ,
+    requests_close_handled_at      TIMESTAMPTZ,
     missed_start_reminder_sent_at  TIMESTAMPTZ,
+    missed_start_escalated_at      TIMESTAMPTZ,
     missed_unload_reminder_sent_at TIMESTAMPTZ,
+    missed_unload_escalated_at     TIMESTAMPTZ,
+    day_reminder_sent_at           TIMESTAMPTZ,
     created_at                     TIMESTAMPTZ   NOT NULL DEFAULT now(),
     updated_at                     TIMESTAMPTZ   NOT NULL DEFAULT now()
 );
-CREATE INDEX firings_scheduled_start_idx ON firings (scheduled_start);
+CREATE INDEX firings_scheduled_date_idx ON firings (scheduled_date);
 CREATE INDEX firings_status_idx ON firings (status);
+CREATE INDEX firings_managed_by_idx ON firings (managed_by_user_id) WHERE managed_by_user_id IS NOT NULL;
+CREATE INDEX firings_kiln_id_idx ON firings (kiln_id);
 
 CREATE TABLE firing_requests (
     id                    BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -149,6 +193,7 @@ CREATE TABLE firing_requests (
     estimated_share_pct   INTEGER        NOT NULL CHECK (estimated_share_pct BETWEEN 1 AND 100),
     cone                  TEXT           NOT NULL,
     clay_body             TEXT,
+    glazed                BOOLEAN        NOT NULL DEFAULT false,
     status                request_status NOT NULL DEFAULT 'pending',
     decision_note         TEXT,
     decided_by_user_id    BIGINT REFERENCES users (id),
@@ -159,6 +204,9 @@ CREATE TABLE firing_requests (
 );
 CREATE INDEX firing_requests_firing_id_idx ON firing_requests (firing_id);
 CREATE INDEX firing_requests_user_id_idx ON firing_requests (user_id);
+CREATE UNIQUE INDEX firing_requests_one_live_per_user_idx
+    ON firing_requests (firing_id, user_id)
+    WHERE status IN ('pending', 'approved');
 
 CREATE TABLE firing_events (
     id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

@@ -38,6 +38,20 @@ var users = []seedUser{
 	{"Carol", "artlab", false},
 }
 
+type seedProfile struct {
+	name     string
+	typ      string
+	cone     string
+	firing   time.Duration
+	cooldown time.Duration
+}
+
+var profiles = []seedProfile{
+	{"Cone 06 Bisque — fast", "bisque", "06", 8 * time.Hour, 12 * time.Hour},
+	{"Cone 6 Glaze — standard", "glaze", "6", 10 * time.Hour, 14 * time.Hour},
+	{"Cone 10 Glaze — slow", "glaze", "10", 14 * time.Hour, 24 * time.Hour},
+}
+
 type seedRequest struct {
 	user   string
 	share  int32
@@ -48,33 +62,35 @@ type seedRequest struct {
 }
 
 type seedFiring struct {
-	proposer     string
-	in           time.Duration // from now
-	typ, cone    string
-	share        int32
-	desc         string
-	status       db.FiringStatus
-	holdReason   string
-	cancelReason string
-	requests     []seedRequest
+	proposer   string
+	profile    string
+	in         time.Duration // from now
+	share      int32
+	desc       string
+	status     db.FiringStatus
+	owner      string // empty = unclaimed
+	holdReason string
+	cancel     string
+	startedAgo time.Duration // 0 = not started
+	requests   []seedRequest
 }
 
 var firings = []seedFiring{
 	{
-		proposer: "Alice", in: -4 * time.Hour, typ: "glaze", cone: "6", share: 60, desc: "Dinner plates",
-		status:   firing.Firing,
+		proposer: "Alice", profile: "Cone 6 Glaze — standard", in: -4 * time.Hour, share: 60, desc: "Dinner plates",
+		status: firing.Firing, owner: "Kim", startedAgo: 3 * time.Hour,
 		requests: []seedRequest{{"Carol", 30, "6", true, "Mugs", db.RequestStatusApproved}},
 	},
 	{
-		proposer: "Kim", in: 50 * time.Hour, typ: "bisque", cone: "04", share: 40, desc: "Greenware from the Tuesday class",
-		status: firing.Confirmed,
+		proposer: "Kim", profile: "Cone 06 Bisque — fast", in: 50 * time.Hour, share: 40, desc: "Greenware from the Tuesday class",
+		status: firing.Scheduled, owner: "Kim",
 		requests: []seedRequest{
-			{"Alice", 30, "04", false, "6 bowls, 2 plates", db.RequestStatusApproved},
-			{"Bob", 15, "04", false, "Tiles", db.RequestStatusPending},
+			{"Alice", 30, "06", false, "6 bowls, 2 plates", db.RequestStatusApproved},
+			{"Bob", 15, "06", false, "Tiles", db.RequestStatusPending},
 		},
 	},
 	{
-		proposer: "Alice", in: 4 * 24 * time.Hour, typ: "glaze", cone: "6", share: 30, desc: "4 mugs, 2 medium bowls",
+		proposer: "Alice", profile: "Cone 6 Glaze — standard", in: 4 * 24 * time.Hour, share: 30, desc: "4 mugs, 2 medium bowls",
 		status: firing.Proposed,
 		requests: []seedRequest{
 			{"Bob", 25, "6", true, "A planter and 3 cups", db.RequestStatusPending},
@@ -82,15 +98,15 @@ var firings = []seedFiring{
 		},
 	},
 	{
-		proposer: "Bob", in: 6 * 24 * time.Hour, typ: "glaze", cone: "10", share: 15, desc: "Test tiles",
+		proposer: "Bob", profile: "Cone 10 Glaze — slow", in: 6 * 24 * time.Hour, share: 15, desc: "Test tiles",
 		status: firing.OnHold, holdReason: "Not enough cone 10 work yet",
 	},
 	{
-		proposer: "Carol", in: 30 * time.Hour, typ: "glaze", cone: "6", share: 20, desc: "Bowls",
-		status: firing.Cancelled, cancelReason: "Kiln element being replaced",
+		proposer: "Carol", profile: "Cone 6 Glaze — standard", in: 30 * time.Hour, share: 20, desc: "Bowls",
+		status: firing.Cancelled, cancel: "Kiln element being replaced",
 	},
 	{
-		proposer: "Sam", in: 10 * 24 * time.Hour, typ: "glaze", cone: "6", share: 50, desc: "Dinnerware set",
+		proposer: "Sam", profile: "Cone 6 Glaze — standard", in: 10 * 24 * time.Hour, share: 50, desc: "Dinnerware set",
 		status: firing.Proposed,
 	},
 }
@@ -133,20 +149,18 @@ func main() {
 		if err != nil {
 			return err
 		}
-		if string(st.Programs) == "[]" {
-			// Sample controller programs for the START FIRING screen (editable in admin settings, M4).
-			if _, err := pool.Exec(ctx, `UPDATE settings SET programs = $1 WHERE id = 1`, samplePrograms); err != nil {
-				return err
-			}
-		}
 		kilns, err := q.ListKilns(ctx) // active first
 		if err != nil {
 			return err
 		}
 		kiln := kilns[0]
+		profileIDs, err := ensureProfiles(ctx, q, kiln.ID)
+		if err != nil {
+			return err
+		}
 		loc, _ := time.LoadLocation(st.Timezone)
 		for _, sf := range firings {
-			if err := seedOne(ctx, q, ids, kiln.ID, st.RequestCutoffHours, loc, sf); err != nil {
+			if err := seedOne(ctx, q, ids, profileIDs, kiln.ID, st.RequestCutoffHours, loc, sf); err != nil {
 				return err
 			}
 		}
@@ -184,19 +198,52 @@ func upsertUser(ctx context.Context, pool *pgxpool.Pool, u seedUser) (int64, err
 			INSERT INTO users (display_name, community) VALUES ($1, $2) RETURNING id
 		)
 		INSERT INTO accounts (user_id, provider, provider_user_id, provider_team_or_guild_id, is_kiln_master)
-		SELECT id, $4, $5, '', $6 FROM u
+		SELECT id, $3, $4, '', $5 FROM u
 		RETURNING user_id`,
 		u.name, u.community, provider, pid, u.kilnMaster).Scan(&id)
 	return id, err
 }
 
-func seedOne(ctx context.Context, q *db.Queries, ids map[string]int64, kilnID int64, cutoff int32, loc *time.Location, sf seedFiring) error {
+func ensureProfiles(ctx context.Context, q *db.Queries, kilnID int64) (map[string]db.FiringProfile, error) {
+	existing, err := q.ListProfiles(ctx)
+	if err != nil {
+		return nil, err
+	}
+	byName := map[string]db.FiringProfile{}
+	for _, p := range existing {
+		if p.KilnID == kilnID {
+			byName[p.Name] = p
+		}
+	}
+	for _, sp := range profiles {
+		if _, ok := byName[sp.name]; ok {
+			continue
+		}
+		p, err := q.CreateProfile(ctx, db.CreateProfileParams{
+			KilnID: kilnID, Name: sp.name, FiringType: sp.typ, Cone: sp.cone,
+			FiringMinutes: int32(sp.firing / time.Minute), CooldownMinutes: int32(sp.cooldown / time.Minute), Active: true,
+		})
+		if err != nil {
+			return nil, err
+		}
+		byName[sp.name] = p
+	}
+	return byName, nil
+}
+
+func seedOne(ctx context.Context, q *db.Queries, ids map[string]int64, profiles map[string]db.FiringProfile, kilnID int64, cutoff int32, loc *time.Location, sf seedFiring) error {
+	profile, ok := profiles[sf.profile]
+	if !ok {
+		return fmt.Errorf("unknown seed profile %q", sf.profile)
+	}
 	// Firings are booked by day: the studio-local day sf.in from now.
 	day := firing.DayOf(time.Now().In(loc).Add(sf.in), loc)
 	created := time.Now().Add(-24 * time.Hour)
 	f, err := q.CreateFiring(ctx, db.CreateFiringParams{
-		KilnID: kilnID, ProposedByUserID: ids[sf.proposer], FiringType: sf.typ, Cone: sf.cone,
-		ScheduledDate: day, ProposerDescription: sf.desc, ProposerSharePct: sf.share, ProposerCone: sf.cone,
+		KilnID: kilnID, ProposedByUserID: ids[sf.proposer], ProfileID: &profile.ID,
+		FiringType: profile.FiringType, Cone: profile.Cone, Title: profile.Name,
+		ScheduledDate: day, FiringMinutes: profile.FiringMinutes, CooldownMinutes: profile.CooldownMinutes,
+		ProposerDescription: sf.desc, ProposerSharePct: sf.share, ProposerCone: profile.Cone,
 		RequestsCloseAt: firing.RequestsCloseAt(firing.DayStart(day, loc), cutoff),
 	})
 	if err != nil {
@@ -219,7 +266,7 @@ func seedOne(ctx context.Context, q *db.Queries, ids map[string]int64, kilnID in
 	for i, r := range sf.requests {
 		at := created.Add(time.Duration(i+1) * time.Hour)
 		var compat *string
-		if c := firing.Compatibility(sf.typ, sf.cone, r.cone, r.glazed); c != "" {
+		if c := firing.Compatibility(profile.FiringType, profile.Cone, r.cone, r.glazed); c != "" {
 			compat = &c
 		}
 		rq, err := q.CreateRequest(ctx, db.CreateRequestParams{
@@ -245,48 +292,72 @@ func seedOne(ctx context.Context, q *db.Queries, ids map[string]int64, kilnID in
 	}
 
 	at := created.Add(6 * time.Hour)
-	setStatus := func(to db.FiringStatus, wasConfirmed bool, hold, cancel *string, note string) error {
+	if sf.owner != "" {
+		owner := ids[sf.owner]
+		if _, err := q.ClaimFiring(ctx, db.ClaimFiringParams{ID: f.ID, UserID: &owner}); err != nil {
+			return err
+		}
+		if err := event(sf.owner, firing.EventClaimed, &proposed, nil, fmt.Sprintf("%s took this firing", sf.owner), at); err != nil {
+			return err
+		}
+		at = at.Add(time.Hour)
+	}
+
+	setStatus := func(to db.FiringStatus, wasScheduled bool, hold, cancel *string, note string) error {
 		from := f.Status
 		var err error
-		f, err = q.SetFiringStatus(ctx, db.SetFiringStatusParams{ID: f.ID, Status: to, WasConfirmed: wasConfirmed, HoldReason: hold, CancelReason: cancel})
+		f, err = q.SetFiringStatus(ctx, db.SetFiringStatusParams{ID: f.ID, Status: to, WasScheduled: wasScheduled, HoldReason: hold, CancelReason: cancel})
 		if err != nil {
 			return err
 		}
 		return event("Kim", firing.EventStatusChange, &from, &to, note, at)
 	}
 	switch sf.status {
-	case firing.Confirmed:
-		err = setStatus(firing.Confirmed, false, nil, nil, "")
+	case firing.Scheduled, firing.Firing:
+		if sf.owner == "" {
+			return fmt.Errorf("%s firing needs an owner", sf.status)
+		}
 	case firing.OnHold:
-		err = setStatus(firing.OnHold, false, &sf.holdReason, nil, sf.holdReason)
+		if err := setStatus(firing.OnHold, false, &sf.holdReason, nil, sf.holdReason); err != nil {
+			return err
+		}
 	case firing.Cancelled:
-		err = setStatus(firing.Cancelled, false, nil, &sf.cancelReason, sf.cancelReason)
-	case firing.Firing:
-		// Confirmed yesterday, started (by the kiln master) 3 hours ago.
-		if err = setStatus(firing.Confirmed, false, nil, nil, ""); err != nil {
-			break
+		if err := setStatus(firing.Cancelled, false, nil, &sf.cancel, sf.cancel); err != nil {
+			return err
 		}
-		started := time.Now().Add(-3 * time.Hour).Truncate(time.Minute)
-		program, dur := "Slow glaze (cone 6)", int32(720)
-		unload := firing.EstimatedUnload(started, dur)
-		if _, err = q.AdvanceFiring(ctx, db.AdvanceFiringParams{ID: f.ID, Status: firing.Firing, Program: &program,
-			EstimatedDurationMinutes: &dur, StartedAt: &started, EstimatedUnloadAt: &unload}); err != nil {
-			break
-		}
-		from, to := firing.Confirmed, firing.Firing
-		err = q.InsertEvent(ctx, db.InsertEventParams{FiringID: f.ID, ActorUserID: ptr(ids["Kim"]), Type: firing.EventStatusChange,
-			FromStatus: &from, ToStatus: &to, OccurredAt: started, Note: ptr(program + ", about 12h"), Source: db.EventSourceKilnQr})
 	}
-	if err != nil {
-		return err
+	if sf.status == firing.Firing {
+		started := time.Now().Add(-sf.startedAgo).Truncate(time.Minute)
+		firingEnds, unloadable := firing.PlannedTimings(started, profile.FiringMinutes, profile.CooldownMinutes)
+		coolingAt := (*time.Time)(nil)
+		if f.Status == firing.Cooling {
+			coolingAt = &firingEnds
+		}
+		if _, err = q.AdvanceFiring(ctx, db.AdvanceFiringParams{ID: f.ID, Status: firing.Firing,
+			StartedAt: &started, FiringEndsAt: &firingEnds, UnloadableAt: &unloadable, CoolingAt: coolingAt}); err != nil {
+			return err
+		}
+		from, to := firing.Scheduled, firing.Firing
+		if err := q.InsertEvent(ctx, db.InsertEventParams{FiringID: f.ID, ActorUserID: ptr(ids["Kim"]), Type: firing.EventStatusChange,
+			FromStatus: &from, ToStatus: &to, OccurredAt: started,
+			Note:   ptr(fmt.Sprintf("%s firing, %s cooldown", formatDuration(profile.FiringMinutes), formatDuration(profile.CooldownMinutes))),
+			Source: db.EventSourceKilnQr}); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
-const samplePrograms = `[
-	{"name": "Bisque (cone 04)", "default_duration_minutes": 600},
-	{"name": "Slow glaze (cone 6)", "default_duration_minutes": 720},
-	{"name": "Fast glaze (cone 6)", "default_duration_minutes": 480}
-]`
+func formatDuration(min int32) string {
+	h, m := min/60, min%60
+	switch {
+	case h == 0:
+		return fmt.Sprintf("%dm", m)
+	case m == 0:
+		return fmt.Sprintf("%dh", h)
+	default:
+		return fmt.Sprintf("%dh %dm", h, m)
+	}
+}
 
 func ptr[T any](v T) *T { return &v }

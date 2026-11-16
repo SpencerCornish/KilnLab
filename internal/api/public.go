@@ -18,20 +18,20 @@ import (
 // names or notes: participant counts only (open question 4).
 
 type publicFiringDTO struct {
-	ID                int64           `json:"id"`
-	KilnName          string          `json:"kiln_name,omitempty"` // only with several active kilns
-	Title             *string         `json:"title"`
-	FiringType        string          `json:"firing_type"`
-	Cone              string          `json:"cone"`
-	ScheduledDate     Day             `json:"scheduled_date"`
-	Status            db.FiringStatus `json:"status"`
-	FullnessPct       int             `json:"fullness_pct"`
-	RoomLeftPct       int             `json:"room_left_pct"`
-	RequestsCloseAt   time.Time       `json:"requests_close_at"`
-	RequestsOpen      bool            `json:"requests_open"`
-	ParticipantCount  int             `json:"participant_count"` // proposer + approved requests
-	StartedAt         *time.Time      `json:"started_at"`
-	EstimatedUnloadAt *time.Time      `json:"estimated_unload_at"`
+	ID               int64           `json:"id"`
+	KilnName         string          `json:"kiln_name,omitempty"` // only with several active kilns
+	Title            string          `json:"title"`
+	FiringType       string          `json:"firing_type"`
+	Cone             string          `json:"cone"`
+	ScheduledDate    Day             `json:"scheduled_date"`
+	Status           db.FiringStatus `json:"status"`
+	FullnessPct      int             `json:"fullness_pct"`
+	RoomLeftPct      int             `json:"room_left_pct"`
+	RequestsCloseAt  time.Time       `json:"requests_close_at"`
+	RequestsOpen     bool            `json:"requests_open"`
+	ParticipantCount int             `json:"participant_count"` // proposer + approved requests
+	StartedAt        *time.Time      `json:"started_at"`
+	UnloadableAt     *time.Time      `json:"unloadable_at"`
 }
 
 type upcomingDTO struct {
@@ -41,8 +41,8 @@ type upcomingDTO struct {
 }
 
 var (
-	upcomingStatuses = []string{"proposed", "on_hold", "confirmed", "loading", "loaded", "firing", "cooling"}
-	calendarStatuses = []string{"proposed", "on_hold", "confirmed", "loading", "loaded", "firing", "cooling", "completed"}
+	upcomingStatuses = []string{"proposed", "on_hold", "scheduled", "firing", "cooling"}
+	calendarStatuses = []string{"proposed", "on_hold", "scheduled", "firing", "cooling", "completed"}
 )
 
 // upcomingGrace keeps a not-yet-started firing listed a while after its start time.
@@ -97,7 +97,7 @@ func (s *Server) handleUpcoming(w http.ResponseWriter, r *http.Request) {
 			ID: f.ID, KilnName: names[f.KilnID], Title: f.Title, FiringType: f.FiringType, Cone: f.Cone,
 			ScheduledDate: Day(f.ScheduledDate), Status: f.Status, FullnessPct: full.Display, RoomLeftPct: full.RoomLeft,
 			RequestsCloseAt: f.RequestsCloseAt, RequestsOpen: firing.RequestsOpen(window(f), now),
-			ParticipantCount: int(row.ApprovedCount) + 1, StartedAt: f.StartedAt, EstimatedUnloadAt: f.EstimatedUnloadAt,
+			ParticipantCount: int(row.ApprovedCount) + 1, StartedAt: f.StartedAt, UnloadableAt: f.UnloadableAt,
 		})
 	}
 	w.Header().Set("Cache-Control", "no-store")
@@ -107,9 +107,9 @@ func (s *Server) handleUpcoming(w http.ResponseWriter, r *http.Request) {
 // calendarPast is how far back the feed keeps firings, so recent ones don't vanish from calendars.
 const calendarPast = 30 * 24 * time.Hour
 
-// calendarEvent maps a firing to a VEVENT. It spans start → unload when an
-// unload time is known (actual, then estimated, then start + program
-// duration); otherwise it's a one-hour marker at the scheduled start.
+// calendarEvent maps a firing to a VEVENT. It spans start → unload when a time
+// is known (actual, then the profile's unloadable estimate); otherwise it's a
+// one-hour marker at the scheduled start.
 func calendarEvent(f db.Firing, full firing.Fullness, kiln, baseURL, host string, loc *time.Location) ical.Event {
 	// Until it has started, a firing is only booked for its day: an all-day event.
 	var start, end time.Time
@@ -122,10 +122,8 @@ func calendarEvent(f db.Firing, full firing.Fullness, kiln, baseURL, host string
 		switch {
 		case f.UnloadedAt != nil && f.UnloadedAt.After(start):
 			end = *f.UnloadedAt
-		case f.EstimatedUnloadAt != nil && f.EstimatedUnloadAt.After(start):
-			end = *f.EstimatedUnloadAt
-		case f.EstimatedDurationMinutes != nil && *f.EstimatedDurationMinutes > 0:
-			end = start.Add(time.Duration(*f.EstimatedDurationMinutes) * time.Minute)
+		case f.UnloadableAt != nil && f.UnloadableAt.After(start):
+			end = *f.UnloadableAt
 		}
 	}
 	link := notify.FiringURL(baseURL, f.ID)
@@ -145,7 +143,7 @@ func calendarEvent(f db.Firing, full firing.Fullness, kiln, baseURL, host string
 }
 
 func tentativeOrConfirmed(st db.FiringStatus) bool {
-	return st == firing.Proposed || st == firing.OnHold || st == firing.Confirmed
+	return st == firing.Proposed || st == firing.OnHold || st == firing.Scheduled
 }
 
 func (s *Server) handleCalendar(w http.ResponseWriter, r *http.Request) {

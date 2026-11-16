@@ -111,6 +111,10 @@ func (s *Server) Handler() http.Handler {
 			r.Put("/admin/settings", s.handleUpdateSettings)
 			r.Post("/admin/kilns", s.handleCreateKiln)
 			r.Put("/admin/kilns/{id}", s.handleUpdateKiln)
+			r.Get("/admin/profiles", s.handleListProfiles)
+			r.Post("/admin/profiles", s.handleCreateProfile)
+			r.Put("/admin/profiles/{id}", s.handleUpdateProfile)
+			r.Delete("/admin/profiles/{id}", s.handleDeactivateProfile)
 			r.Get("/admin/blackouts", s.handleListBlackouts)
 			r.Post("/admin/blackouts", s.handleCreateBlackout)
 			r.Delete("/admin/blackouts/{id}", s.handleDeleteBlackout)
@@ -125,8 +129,12 @@ func (s *Server) Handler() http.Handler {
 				r.Post("/requests/{rid}/withdraw", s.handleWithdrawRequest)
 				r.Post("/requests/{rid}/decide", s.handleDecideRequest)
 
+				// Ownership and profile.
+				r.Post("/claim", s.handleClaim)
+				r.Post("/unclaim", s.handleUnclaim)
+				r.Put("/profile", s.handleChangeProfile)
+
 				// Kiln master controls.
-				r.Post("/confirm", s.handleConfirm)
 				r.Post("/hold", s.handleHold)
 				r.Post("/release", s.handleRelease)
 				r.Post("/reschedule", s.handleReschedule)
@@ -134,7 +142,7 @@ func (s *Server) Handler() http.Handler {
 				r.Put("/fullness-override", s.handleFullnessOverride)
 				r.Put("/requests-window", s.handleRequestsWindow)
 
-				// Lifecycle: loading … completed, and fixing times afterwards.
+				// Lifecycle: start and unload, plus fixing times afterwards.
 				r.Post("/status", s.handleAdvance)
 				r.Put("/timestamps", s.handleCorrectTimestamp)
 			})

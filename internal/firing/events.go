@@ -4,6 +4,9 @@ package firing
 // requests writes one (spec §6). M3 notifications key off these too.
 const (
 	EventCreated            = "created"
+	EventClaimed            = "claimed"
+	EventUnclaimed          = "unclaimed"
+	EventProfileChanged     = "profile_changed"
 	EventStatusChange       = "status_change"
 	EventRescheduled        = "rescheduled"
 	EventRequestSubmitted   = "request_submitted"

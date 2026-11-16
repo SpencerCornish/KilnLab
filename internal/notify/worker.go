@@ -167,6 +167,13 @@ func (w *Worker) card(ctx context.Context, q *db.Queries, f db.Firing, st db.Set
 		Firing: f, ProposerName: name, ApprovedCount: len(approved), Now: w.now(), BaseURL: w.cfg.BaseURL,
 		Fullness: firing.ComputeFullness(f.ProposerSharePct, approved, f.FullnessOverridePct), Loc: location(st),
 	}
+	if f.ManagedByUserID != nil {
+		if owner, err := q.GetUserName(ctx, *f.ManagedByUserID); err == nil {
+			if ok, _ := q.UserIsKilnMaster(ctx, *f.ManagedByUserID); ok {
+				in.OwnerName = owner
+			}
+		}
+	}
 	active := 0
 	for _, k := range kilns {
 		if k.Active {

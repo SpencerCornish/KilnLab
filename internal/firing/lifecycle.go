@@ -9,34 +9,28 @@ import (
 
 // ── Next actions (§9B step 3) ───────────────────────────────────────────────
 
-// NextSteps are the lifecycle statuses to offer this actor as buttons: the
-// first step forward they're allowed to take, plus START FIRING for kiln
-// masters while the kiln hasn't started yet (skipping is allowed).
+// NextSteps are the user-driven lifecycle statuses to offer this actor: START
+// FIRING for kiln masters on a scheduled firing, and UNLOADED for anyone once
+// the kiln has started. Cooling is automatic, so it is never offered.
 func NextSteps(s State, a Actor) []Status {
-	from := slices.Index(lifecycle, s.Status)
-	if from < 0 {
-		return nil
-	}
-	var out []Status
-	for _, to := range lifecycle[from+1:] {
-		if Advance(s, to, a) == nil {
-			out = append(out, to)
-			break
+	switch s.Status {
+	case Scheduled:
+		if a.Roles.CanStartFiring() {
+			return []Status{Firing}
 		}
+	case Firing, Cooling:
+		return []Status{Completed}
 	}
-	if a.Roles.CanStartFiring() && from < slices.Index(lifecycle, Firing) && !slices.Contains(out, Firing) {
-		out = append(out, Firing)
-	}
-	return out
+	return nil
 }
 
-// BlockedReason explains, for an actor with no next steps, why not. Empty
-// when there's nothing to explain (e.g. the firing is finished).
+// BlockedReason explains, for an actor with no next steps, why not. Empty when
+// there is nothing to explain.
 func BlockedReason(s State, a Actor) string {
-	if len(NextSteps(s, a)) > 0 || !slices.Contains(lifecycle[:len(lifecycle)-1], s.Status) {
+	if len(NextSteps(s, a)) > 0 {
 		return ""
 	}
-	if s.Status == Loaded {
+	if s.Status == Scheduled {
 		return "Only kiln masters can start the kiln."
 	}
 	return ""
@@ -44,17 +38,21 @@ func BlockedReason(s State, a Actor) string {
 
 // ── Relevant firings for the kiln QR (§9B step 2) ───────────────────────────
 
-var inProgress = []Status{Loading, Loaded, Firing, Cooling}
+var inProgress = []Status{Firing, Cooling}
 
-// KilnRelevanceWindow: confirmed firings this close to their start count.
+// activeAtKiln are the pre-start statuses that can be claimed/started at the wall.
+var activeAtKiln = []Status{Proposed, OnHold, Scheduled}
+
+// KilnRelevanceWindow: pre-start firings this close to their day count.
 const KilnRelevanceWindow = 24 * time.Hour
 
-// RelevantAtKiln: any in-progress firing, or a confirmed one starting within ±24h.
+// RelevantAtKiln: any in-progress firing, or a proposed/on-hold/scheduled one
+// within ±24h of its day. Unclaimed firings appear so a KM can claim them.
 func RelevantAtKiln(status Status, start, now time.Time) bool {
 	if slices.Contains(inProgress, status) {
 		return true
 	}
-	if status != Confirmed {
+	if !slices.Contains(activeAtKiln, status) {
 		return false
 	}
 	d := start.Sub(now)
@@ -63,15 +61,15 @@ func RelevantAtKiln(status Status, start, now time.Time) bool {
 
 // ── Timestamps & back-dating (§6, §12) ──────────────────────────────────────
 
-// Timestamps are a firing's lifecycle times, in order. Completed is the unload
-// step, so unloaded, ready for pickup and completed share one instant: setting
-// UnloadedAt sets all three (see With).
+// Timestamps are a firing's recorded lifecycle times, in order. FiringEndsAt
+// and UnloadableAt are estimates derived from the profile, not recorded events.
 type Timestamps struct {
-	StartedAt, CoolingAt, UnloadedAt, ReadyForPickupAt, CompletedAt *time.Time
+	StartedAt, CoolingAt, UnloadedAt *time.Time
+	FiringEndsAt, UnloadableAt       *time.Time
 }
 
-// TimestampField is the firings column a status sets, or "" for statuses
-// that only write an event (loading, loaded).
+// TimestampField is the firings column a status sets, or "" for statuses that
+// only write an event.
 func TimestampField(to Status) string {
 	switch to {
 	case Firing:
@@ -84,15 +82,13 @@ func TimestampField(to Status) string {
 	return ""
 }
 
-// CorrectableFields in lifecycle order. ready_for_pickup_at and completed_at
-// follow unloaded_at, so they aren't corrected separately.
+// CorrectableFields in lifecycle order.
 var CorrectableFields = []string{"started_at", "cooling_at", "unloaded_at"}
 
-// timestampNames matches ordered() one to one.
-var timestampNames = []string{"started_at", "cooling_at", "unloaded_at", "ready_for_pickup_at", "completed_at"}
+var timestampNames = []string{"started_at", "cooling_at", "unloaded_at"}
 
-func (t Timestamps) ordered() []*time.Time {
-	return []*time.Time{t.StartedAt, t.CoolingAt, t.UnloadedAt, t.ReadyForPickupAt, t.CompletedAt}
+func (t Timestamps) recorded() []*time.Time {
+	return []*time.Time{t.StartedAt, t.CoolingAt, t.UnloadedAt}
 }
 
 // Get returns the timestamp for a correctable field name.
@@ -100,11 +96,10 @@ func (t Timestamps) Get(field string) *time.Time {
 	if !slices.Contains(CorrectableFields, field) {
 		return nil
 	}
-	return t.ordered()[slices.Index(timestampNames, field)]
+	return t.recorded()[slices.Index(timestampNames, field)]
 }
 
-// With returns a copy with field set to at. Setting unloaded_at also sets
-// ready_for_pickup_at and completed_at, since they're the same step.
+// With returns a copy with field set to at.
 func (t Timestamps) With(field string, at time.Time) Timestamps {
 	switch field {
 	case "started_at":
@@ -112,15 +107,15 @@ func (t Timestamps) With(field string, at time.Time) Timestamps {
 	case "cooling_at":
 		t.CoolingAt = &at
 	case "unloaded_at":
-		t.UnloadedAt, t.ReadyForPickupAt, t.CompletedAt = &at, &at, &at
+		t.UnloadedAt = &at
 	}
 	return t
 }
 
-// Latest is the most recent set timestamp, or nil.
+// Latest is the most recent recorded timestamp, or nil.
 func (t Timestamps) Latest() *time.Time {
 	var latest *time.Time
-	for _, ts := range t.ordered() {
+	for _, ts := range t.recorded() {
 		if ts != nil && (latest == nil || ts.After(*latest)) {
 			latest = ts
 		}
@@ -128,11 +123,12 @@ func (t Timestamps) Latest() *time.Time {
 	return latest
 }
 
-// CheckOrder: set timestamps must not go backwards (cooling before started etc.).
+// CheckOrder: recorded timestamps must not go backwards (cooling before
+// started, unloaded before cooling, etc.).
 func (t Timestamps) CheckOrder() error {
 	var prev *time.Time
 	prevName := ""
-	for i, ts := range t.ordered() {
+	for i, ts := range t.recorded() {
 		if ts == nil {
 			continue
 		}
@@ -147,7 +143,6 @@ func (t Timestamps) CheckOrder() error {
 func fieldLabel(f string) string {
 	return map[string]string{
 		"started_at": "started", "cooling_at": "cooling", "unloaded_at": "unloaded",
-		"ready_for_pickup_at": "unloaded", "completed_at": "unloaded",
 	}[f]
 }
 
@@ -171,7 +166,18 @@ func CheckOccurredAt(at, now time.Time) error {
 	return nil
 }
 
-// EstimatedUnload = start + duration.
-func EstimatedUnload(start time.Time, durationMinutes int32) time.Time {
-	return start.Add(time.Duration(durationMinutes) * time.Minute)
+// PlannedTimings derives the estimated firing end and unloadable moment from
+// an actual start and the profile's rough times.
+func PlannedTimings(start time.Time, firingMinutes, cooldownMinutes int32) (firingEnds, unloadable time.Time) {
+	firingEnds = start.Add(time.Duration(firingMinutes) * time.Minute)
+	unloadable = firingEnds.Add(time.Duration(cooldownMinutes) * time.Minute)
+	return firingEnds, unloadable
+}
+
+// ReadyToUnload reports whether the rough cooldown has elapsed.
+func ReadyToUnload(status Status, unloadableAt *time.Time, now time.Time) bool {
+	if status != Firing && status != Cooling {
+		return false
+	}
+	return unloadableAt != nil && !now.Before(*unloadableAt)
 }

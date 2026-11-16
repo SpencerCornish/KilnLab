@@ -15,40 +15,20 @@ import (
 	"github.com/spencercornish/kilnlab/internal/notify"
 )
 
-// ── Programs (settings.programs) ────────────────────────────────────────────
-
-type programDTO struct {
-	Name                   string `json:"name"`
-	DefaultDurationMinutes *int32 `json:"default_duration_minutes,omitempty"`
-}
-
-func parsePrograms(raw json.RawMessage) []programDTO {
-	var ps []programDTO
-	if err := json.Unmarshal(raw, &ps); err != nil || ps == nil {
-		return []programDTO{}
-	}
-	return ps
-}
-
-// ── Status changes (loading … completed) ────────────────────────────────────
-
-const (
-	maxProgram     = 100
-	maxDurationMin = 7 * 24 * 60
-)
+// ── Status changes (start … unload) ─────────────────────────────────────────
 
 type advanceInput struct {
-	To                       db.FiringStatus `json:"to"`
-	OccurredAt               *time.Time      `json:"occurred_at"` // back-dating; kiln masters only
-	Program                  *string         `json:"program"`
-	EstimatedDurationMinutes *int32          `json:"estimated_duration_minutes"`
-	Note                     *string         `json:"note"`
-	Source                   db.EventSource  `json:"source"` // web | kiln_qr
+	To         db.FiringStatus `json:"to"`
+	OccurredAt *time.Time      `json:"occurred_at"` // back-dating; kiln masters only
+	Note       *string         `json:"note"`
+	Source     db.EventSource  `json:"source"` // web | kiln_qr
 }
 
 func timestampsOf(f db.Firing) firing.Timestamps {
-	return firing.Timestamps{StartedAt: f.StartedAt, CoolingAt: f.CoolingAt, UnloadedAt: f.UnloadedAt,
-		ReadyForPickupAt: f.ReadyForPickupAt, CompletedAt: f.CompletedAt}
+	return firing.Timestamps{
+		StartedAt: f.StartedAt, CoolingAt: f.CoolingAt, UnloadedAt: f.UnloadedAt,
+		FiringEndsAt: f.FiringEndsAt, UnloadableAt: f.UnloadableAt,
+	}
 }
 
 // occurredAt resolves when a change happened: now, or a back-dated time for
@@ -110,25 +90,15 @@ func (s *Server) handleAdvance(w http.ResponseWriter, r *http.Request) {
 		var eventNote *string
 		switch in.To {
 		case firing.Firing:
-			program, err := text("program", ptrOr(in.Program, ""), maxProgram, true)
-			if err != nil {
-				return nil, err
-			}
-			if in.EstimatedDurationMinutes == nil || *in.EstimatedDurationMinutes < 1 || *in.EstimatedDurationMinutes > maxDurationMin {
-				return nil, badRequest("estimated duration is required (in minutes, up to 7 days)")
-			}
-			unload := firing.EstimatedUnload(at, *in.EstimatedDurationMinutes)
-			p.Program, p.EstimatedDurationMinutes, p.StartedAt, p.EstimatedUnloadAt = &program, in.EstimatedDurationMinutes, &at, &unload
-			n := fmt.Sprintf("%s, about %s", program, formatDuration(*in.EstimatedDurationMinutes))
+			firingEnds, unloadable := firing.PlannedTimings(at, f.FiringMinutes, f.CooldownMinutes)
+			p.StartedAt, p.FiringEndsAt, p.UnloadableAt = &at, &firingEnds, &unloadable
+			ev := fmt.Sprintf("%s firing, %s cooldown", formatDuration(f.FiringMinutes), formatDuration(f.CooldownMinutes))
 			if note != nil {
-				n += ". " + *note
+				ev += ". " + *note
 			}
-			eventNote = &n
-		case firing.Cooling:
-			p.CoolingAt = &at
+			eventNote = &ev
 		case firing.Completed:
-			// Unloaded, ready for pickup and completed are one step.
-			p.UnloadedAt, p.ReadyForPickupAt, p.CompletedAt = &at, &at, &at
+			p.UnloadedAt = &at
 		}
 		if eventNote == nil {
 			eventNote = note
@@ -143,7 +113,9 @@ func (s *Server) handleAdvance(w http.ResponseWriter, r *http.Request) {
 			n.ThreadReply(notify.ThreadStarted(updated, loc))
 		case firing.Completed:
 			n.ThreadReply(notify.ThreadReady())
-			ids, err := q.ListParticipants(ctx, db.ListParticipantsParams{FiringID: f.ID, Statuses: []string{string(db.RequestStatusApproved)}})
+			ids, err := q.ListParticipants(ctx, db.ListParticipantsParams{
+				FiringID: f.ID, Statuses: []string{string(db.RequestStatusApproved)},
+			})
 			if err != nil {
 				return nil, err
 			}
@@ -155,13 +127,6 @@ func (s *Server) handleAdvance(w http.ResponseWriter, r *http.Request) {
 			OccurredAt: at, Note: eventNote, Source: source,
 		})
 	})
-}
-
-func ptrOr[T any](p *T, def T) T {
-	if p == nil {
-		return def
-	}
-	return *p
 }
 
 func formatDuration(min int32) string {
@@ -205,17 +170,16 @@ func (s *Server) handleCorrectTimestamp(w http.ResponseWriter, r *http.Request) 
 			return nil, badRequest("that time is in the future")
 		}
 		ts = ts.With(in.Field, at)
+		if in.Field == "started_at" {
+			firingEnds, unloadable := firing.PlannedTimings(at, f.FiringMinutes, f.CooldownMinutes)
+			ts.FiringEndsAt, ts.UnloadableAt = &firingEnds, &unloadable
+		}
 		if err := ts.CheckOrder(); err != nil {
 			return nil, badRequest("%s", err.Error())
 		}
-		unload := f.EstimatedUnloadAt
-		if in.Field == "started_at" && f.EstimatedDurationMinutes != nil {
-			u := firing.EstimatedUnload(at, *f.EstimatedDurationMinutes)
-			unload = &u
-		}
 		if _, err := q.CorrectTimestamps(ctx, db.CorrectTimestampsParams{
-			ID: f.ID, StartedAt: ts.StartedAt, EstimatedUnloadAt: unload, CoolingAt: ts.CoolingAt,
-			UnloadedAt: ts.UnloadedAt, ReadyForPickupAt: ts.ReadyForPickupAt, CompletedAt: ts.CompletedAt,
+			ID: f.ID, StartedAt: ts.StartedAt, FiringEndsAt: ts.FiringEndsAt, UnloadableAt: ts.UnloadableAt,
+			CoolingAt: ts.CoolingAt, UnloadedAt: ts.UnloadedAt,
 		}); err != nil {
 			return nil, err
 		}
@@ -248,12 +212,13 @@ func (s *Server) studioLocation(ctx context.Context, q *db.Queries) *time.Locati
 type kilnFiringDTO struct {
 	ID            int64           `json:"id"`
 	KilnID        int64           `json:"kiln_id"`
-	Title         *string         `json:"title"`
+	Title         string          `json:"title"`
 	FiringType    string          `json:"firing_type"`
 	Cone          string          `json:"cone"`
 	ScheduledDate Day             `json:"scheduled_date"`
 	Status        db.FiringStatus `json:"status"`
 	ProposerName  string          `json:"proposer_name"`
+	OwnerName     string          `json:"owner_name"`
 }
 
 type kilnViewDTO struct {
@@ -262,8 +227,8 @@ type kilnViewDTO struct {
 }
 
 // handleKiln lists the firings relevant at the kiln right now: in progress, or
-// confirmed and starting within ±24h. ?k=<kiln id> narrows to one kiln (each
-// kiln's QR code carries its id).
+// pre-start within ±24h. Unclaimed firings appear so a KM can take them.
+// ?k=<kiln id> narrows to one kiln (each kiln's QR code carries its id).
 func (s *Server) handleKiln(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var out kilnViewDTO
@@ -300,7 +265,7 @@ func (s *Server) handleKiln(w http.ResponseWriter, r *http.Request) {
 		}
 		out.Firings = append(out.Firings, kilnFiringDTO{ID: f.ID, KilnID: f.KilnID, Title: f.Title,
 			FiringType: f.FiringType, Cone: f.Cone, ScheduledDate: Day(f.ScheduledDate), Status: f.Status,
-			ProposerName: row.ProposerName})
+			ProposerName: row.ProposerName, OwnerName: row.OwnerName})
 	}
 	writeJSON(w, http.StatusOK, out)
 }

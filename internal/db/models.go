@@ -192,10 +192,8 @@ type FiringStatus string
 
 const (
 	FiringStatusProposed  FiringStatus = "proposed"
+	FiringStatusScheduled FiringStatus = "scheduled"
 	FiringStatusOnHold    FiringStatus = "on_hold"
-	FiringStatusConfirmed FiringStatus = "confirmed"
-	FiringStatusLoading   FiringStatus = "loading"
-	FiringStatusLoaded    FiringStatus = "loaded"
 	FiringStatusFiring    FiringStatus = "firing"
 	FiringStatusCooling   FiringStatus = "cooling"
 	FiringStatusCompleted FiringStatus = "completed"
@@ -240,10 +238,8 @@ func (ns NullFiringStatus) Value() (driver.Value, error) {
 func (e FiringStatus) Valid() bool {
 	switch e {
 	case FiringStatusProposed,
+		FiringStatusScheduled,
 		FiringStatusOnHold,
-		FiringStatusConfirmed,
-		FiringStatusLoading,
-		FiringStatusLoaded,
 		FiringStatusFiring,
 		FiringStatusCooling,
 		FiringStatusCompleted,
@@ -256,10 +252,8 @@ func (e FiringStatus) Valid() bool {
 func AllFiringStatusValues() []FiringStatus {
 	return []FiringStatus{
 		FiringStatusProposed,
+		FiringStatusScheduled,
 		FiringStatusOnHold,
-		FiringStatusConfirmed,
-		FiringStatusLoading,
-		FiringStatusLoaded,
 		FiringStatusFiring,
 		FiringStatusCooling,
 		FiringStatusCompleted,
@@ -465,12 +459,16 @@ type Firing struct {
 	ID                         int64        `json:"id"`
 	KilnID                     int64        `json:"kiln_id"`
 	ProposedByUserID           int64        `json:"proposed_by_user_id"`
+	ManagedByUserID            *int64       `json:"managed_by_user_id"`
+	AssignedAt                 *time.Time   `json:"assigned_at"`
+	ProfileID                  *int64       `json:"profile_id"`
 	FiringType                 string       `json:"firing_type"`
 	Cone                       string       `json:"cone"`
-	Title                      *string      `json:"title"`
+	Title                      string       `json:"title"`
 	Notes                      string       `json:"notes"`
+	ScheduledDate              time.Time    `json:"scheduled_date"`
 	Status                     FiringStatus `json:"status"`
-	WasConfirmed               bool         `json:"was_confirmed"`
+	WasScheduled               bool         `json:"was_scheduled"`
 	HoldReason                 *string      `json:"hold_reason"`
 	CancelReason               *string      `json:"cancel_reason"`
 	ProposerDescription        string       `json:"proposer_description"`
@@ -480,22 +478,22 @@ type Firing struct {
 	FullnessOverridePct        *int32       `json:"fullness_override_pct"`
 	RequestsCloseAt            time.Time    `json:"requests_close_at"`
 	RequestsClosedManually     bool         `json:"requests_closed_manually"`
-	Program                    *string      `json:"program"`
-	EstimatedDurationMinutes   *int32       `json:"estimated_duration_minutes"`
+	FiringMinutes              int32        `json:"firing_minutes"`
+	CooldownMinutes            int32        `json:"cooldown_minutes"`
 	StartedAt                  *time.Time   `json:"started_at"`
-	EstimatedUnloadAt          *time.Time   `json:"estimated_unload_at"`
+	FiringEndsAt               *time.Time   `json:"firing_ends_at"`
+	UnloadableAt               *time.Time   `json:"unloadable_at"`
 	CoolingAt                  *time.Time   `json:"cooling_at"`
 	UnloadedAt                 *time.Time   `json:"unloaded_at"`
-	ReadyForPickupAt           *time.Time   `json:"ready_for_pickup_at"`
-	CompletedAt                *time.Time   `json:"completed_at"`
 	UnderfilledAlertSentAt     *time.Time   `json:"underfilled_alert_sent_at"`
+	RequestsCloseHandledAt     *time.Time   `json:"requests_close_handled_at"`
 	MissedStartReminderSentAt  *time.Time   `json:"missed_start_reminder_sent_at"`
+	MissedStartEscalatedAt     *time.Time   `json:"missed_start_escalated_at"`
 	MissedUnloadReminderSentAt *time.Time   `json:"missed_unload_reminder_sent_at"`
+	MissedUnloadEscalatedAt    *time.Time   `json:"missed_unload_escalated_at"`
+	DayReminderSentAt          *time.Time   `json:"day_reminder_sent_at"`
 	CreatedAt                  time.Time    `json:"created_at"`
 	UpdatedAt                  time.Time    `json:"updated_at"`
-	RequestsCloseHandledAt     *time.Time   `json:"requests_close_handled_at"`
-	ScheduledDate              time.Time    `json:"scheduled_date"`
-	DayReminderSentAt          *time.Time   `json:"day_reminder_sent_at"`
 }
 
 type FiringEvent struct {
@@ -511,6 +509,19 @@ type FiringEvent struct {
 	Source      EventSource   `json:"source"`
 }
 
+type FiringProfile struct {
+	ID              int64     `json:"id"`
+	KilnID          int64     `json:"kiln_id"`
+	Name            string    `json:"name"`
+	FiringType      string    `json:"firing_type"`
+	Cone            string    `json:"cone"`
+	FiringMinutes   int32     `json:"firing_minutes"`
+	CooldownMinutes int32     `json:"cooldown_minutes"`
+	Active          bool      `json:"active"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
 type FiringRequest struct {
 	ID                   int64         `json:"id"`
 	FiringID             int64         `json:"firing_id"`
@@ -519,6 +530,7 @@ type FiringRequest struct {
 	EstimatedSharePct    int32         `json:"estimated_share_pct"`
 	Cone                 string        `json:"cone"`
 	ClayBody             *string       `json:"clay_body"`
+	Glazed               bool          `json:"glazed"`
 	Status               RequestStatus `json:"status"`
 	DecisionNote         *string       `json:"decision_note"`
 	DecidedByUserID      *int64        `json:"decided_by_user_id"`
@@ -526,7 +538,6 @@ type FiringRequest struct {
 	CompatibilityWarning *string       `json:"compatibility_warning"`
 	CreatedAt            time.Time     `json:"created_at"`
 	UpdatedAt            time.Time     `json:"updated_at"`
-	Glazed               bool          `json:"glazed"`
 }
 
 type Kiln struct {
@@ -592,21 +603,21 @@ type Session struct {
 }
 
 type Setting struct {
-	ID                       int32           `json:"id"`
-	Timezone                 string          `json:"timezone"`
-	MinNoticeHours           int32           `json:"min_notice_hours"`
-	RequestCutoffHours       int32           `json:"request_cutoff_hours"`
-	UnderfilledThresholdPct  int32           `json:"underfilled_threshold_pct"`
-	FiringTypes              []string        `json:"firing_types"`
-	Cones                    []string        `json:"cones"`
-	Programs                 json.RawMessage `json:"programs"`
-	DiscordChannelID         string          `json:"discord_channel_id"`
-	SlackChannelID           string          `json:"slack_channel_id"`
-	MissedStartGraceMinutes  int32           `json:"missed_start_grace_minutes"`
-	MissedUnloadGraceMinutes int32           `json:"missed_unload_grace_minutes"`
-	PublicPageDaysAhead      int32           `json:"public_page_days_ahead"`
-	UpdatedAt                time.Time       `json:"updated_at"`
-	DayReminderHour          int32           `json:"day_reminder_hour"`
+	ID                       int32     `json:"id"`
+	Timezone                 string    `json:"timezone"`
+	MinNoticeHours           int32     `json:"min_notice_hours"`
+	RequestCutoffHours       int32     `json:"request_cutoff_hours"`
+	UnderfilledThresholdPct  int32     `json:"underfilled_threshold_pct"`
+	FiringTypes              []string  `json:"firing_types"`
+	Cones                    []string  `json:"cones"`
+	DiscordChannelID         string    `json:"discord_channel_id"`
+	SlackChannelID           string    `json:"slack_channel_id"`
+	MissedStartGraceMinutes  int32     `json:"missed_start_grace_minutes"`
+	MissedUnloadGraceMinutes int32     `json:"missed_unload_grace_minutes"`
+	EscalationGraceMinutes   int32     `json:"escalation_grace_minutes"`
+	DayReminderHour          int32     `json:"day_reminder_hour"`
+	PublicPageDaysAhead      int32     `json:"public_page_days_ahead"`
+	UpdatedAt                time.Time `json:"updated_at"`
 }
 
 type User struct {
