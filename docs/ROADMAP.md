@@ -90,16 +90,16 @@ reschedule, cancel, close/reopen requests; unit tests for state machine, permiss
 | Item | Status | Notes |
 |---|:-:|---|
 | All status transitions (§6) with permissions | ✅ | `POST /api/firings/{id}/status`. Only kiln masters start the kiln (server-side, tested) |
-| Timestamps + back-dating (kiln masters, ≤7 days, not before the last recorded step) | ✅ | `started_at`, `cooling_at`, `unloaded_at`, `ready_for_pickup_at`, `completed_at`; event `occurred_at` back-dated too |
-| Correct a timestamp afterwards | ✅ | `PUT /api/firings/{id}/timestamps`; order enforced; est. unload follows a corrected start |
-| START FIRING: program (settings list or free text) + duration → `estimated_unload_at` | ✅ | Programs come from `settings.programs` (`make seed` adds samples; editable in M4) |
+| Timestamps + back-dating (kiln masters, ≤7 days, not before the last recorded step) | ✅ | `started_at`, `firing_ends_at`, `unloadable_at`, `cooling_at`, `unloaded_at`; event `occurred_at` back-dated too |
+| Correct a timestamp afterwards | ✅ | `PUT /api/firings/{id}/timestamps`; order enforced; the two estimates follow a corrected start |
+| START FIRING: one tap using the firing profile; automatic cooling and unloadable time | ✅ | D52–D55; profile supplies firing + cooldown minutes. No program/duration typed |
 | `/kiln` (§9B): relevant firings, auto-open single, pick list, "No active firing" | ✅ | `GET /api/kiln?k=<kiln id>`; QR per kiln (D24) |
 | `/kiln/:id`: summary + only this user's next steps, confirm screen, success screen | ✅ | Events tagged `source = kiln_qr` |
 | Same actions + time fixes on `/firings/:id` | ✅ | |
 | `/admin/users`: admin toggle (admin only; self-loader removed, #15) | ✅ | Can't remove your own admin. `/admin` index links here |
 | Integration tests | ✅ | `internal/api/lifecycle_integration_test.go` |
 | **`/kiln` checked on a real phone** (incl. pick list) | ⬜ | Owner/dev to try via LAN URL; real QR needs staging |
-| Ready-for-pickup DMs | ⬜ | M3 (the confirm screen already warns participants will be told) |
+| Ready-for-pickup DMs | ✅ | Completed sends DMs to the proposer + approved requesters (M3) |
 | Printable QR codes per kiln | ⬜ | Could live on `/admin/settings` (M4) |
 
 ## M3 — Notifications
@@ -113,23 +113,24 @@ reschedule, cancel, close/reopen requests; unit tests for state machine, permiss
 | Render-hash dedupe (`last_rendered_hash`) | ✅ | Unchanged cards aren't re-edited |
 | Thread replies: started, ready for pickup, cancelled, rescheduled | ✅ | Open question 11 default |
 | DMs: approved/declined (with note), hold/reschedule/cancel (all participants), ready (approved + proposer) | ✅ | To the platform the user signed in with; the actor is never DMed about their own action |
+| Ownership-aware DMs | ✅ | Requests/cutoff/day-of go to the owner, or all KMs while unclaimed. Missed start/unload escalates to all KMs + admins (D53) |
 | `NOTIFICATIONS_DRY_RUN` for local dev (logs instead of sending, no tokens needed) | ✅ | On in `.env.example` |
 | Admin notification log on `/admin` (status, attempts, last error) | ✅ | `GET /api/admin/notifications` |
 | Tests | ✅ | `internal/notify/*_test.go` (fake APIs), `internal/api/notify_integration_test.go` |
 | **Real Discord bot + Slack bot posting to real channels** | 🚫 | Owner: bot tokens, invite bots, channel IDs (README) |
-| Kiln-master alert DMs (under-filled, missed start/unload) | ⬜ | M4 jobs; `notify.Enqueue` with firingID 0 + `ListKilnMasterIDs` are ready |
+| Kiln-master alert DMs (under-filled, needs owner, day-of, missed start/unload, escalation) | ✅ | M4 jobs; `notify.Enqueue` + the responsible-recipient helper |
 
 ## M4 — Jobs, public page, calendar
 
 | Item | Status | Notes |
 |---|:-:|---|
 | In-process scheduler (5-min tick, plus once at startup) | ✅ | `internal/jobs` (`Runner`), started from `cmd/server`. One transaction per firing; one failure doesn't stop the others |
-| Jobs: close requests, under-filled alert, unconfirmed reminder, missed start, missed unload | ✅ | Pure `jobs.Due` + unit tests; idempotent via `*_sent_at` + new `requests_close_handled_at` (migration 003). D33–D37 |
+| Jobs: auto-cooling, close requests, under-filled alert, needs-owner reminder, day-of, missed start/unload, escalation | ✅ | Pure `jobs.Due` + unit tests; idempotent via `*_sent_at` + `requests_close_handled_at`. D33–D37, D52–D55 |
 | Re-arming after reschedule / reopen | ✅ | Integration tested (`internal/api/jobs_integration_test.go`, incl. §14 step 9) |
 | Timeline shows system actions ("· automatic") | ✅ | `alert_sent` events, source `system` |
 | `/upcoming` public page (§9A) | ✅ | `GET /api/public/upcoming`, no names/notes (tested). "Request space" → login → request form opens (`/firings/:id?request=1`) |
 | `/calendar.ics` | ✅ | `internal/ical` (escaping, folding, tested). D39. Linked from `/upcoming` (webcal + copy link) |
-| `/admin/settings`: all settings, programs editor, channel IDs, bot status | ✅ | `GET/PUT /api/admin/settings`, validated (tested) |
+| `/admin/settings`: all settings, per-kiln firing profiles, channel IDs, bot status | ✅ | `GET/PUT /api/admin/settings` + `/api/admin/profiles`, validated (tested) |
 | Kilns: add / edit dimensions / deactivate | ✅ | `POST /api/admin/kilns`, `PUT /api/admin/kilns/{id}`; at least one stays active |
 | Printable QR codes (wheel + per kiln) | ✅ | `/admin/qr` (D41) |
 | **Phone check of `/upcoming`, `/admin/settings` and printed QR codes** | ⬜ | Needs staging for real QR scans |
