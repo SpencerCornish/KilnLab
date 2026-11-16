@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, Navigate, useParams, useSearchParams } from 'react-router'
 import { Alert, firingTitle, kilnLabel, StatusBadge, STATUS_LABELS } from '../components/firing'
 import { LifecyclePanel, STEP_LABELS } from '../components/lifecycle'
-import { getFiring, getKilnView, getOptions } from '../lib/api'
+import { firingActions, getFiring, getKilnView, getOptions } from '../lib/api'
 import { PageSpinner } from '../lib/session'
 import { formatDate, formatWhen } from '../lib/time'
 import type { FiringStatus, MutationResult } from '../lib/types'
@@ -68,6 +68,8 @@ export function KilnFiringPage() {
   const k = params.get('k')
   const { data, error, setData } = useLoad(() => Promise.all([getFiring(id), getOptions()]), [id])
   const [done, setDone] = useState<FiringStatus | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [claimError, setClaimError] = useState<string | null>(null)
 
   if (error) return <Alert kind="error">{error === 'not found' ? 'That firing does not exist.' : error}</Alert>
   if (!data) return <PageSpinner />
@@ -79,6 +81,20 @@ export function KilnFiringPage() {
     setData([res, options])
     setDone(step)
     window.scrollTo({ top: 0 })
+  }
+
+  async function claim() {
+    setBusy(true)
+    setClaimError(null)
+    try {
+      const res = await firingActions.claim(id)
+      setData([res, options])
+      window.scrollTo({ top: 0 })
+    } catch (e) {
+      setClaimError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -116,6 +132,12 @@ export function KilnFiringPage() {
         </div>
       </section>
 
+      {claimError && <Alert kind="error">{claimError}</Alert>}
+      {!done && detail.can.claim && (
+        <button disabled={busy} onClick={() => void claim()} className="kc-key kc-key--block kc-key--fire kc-key--lg">
+          {busy ? 'Taking…' : 'Take this firing'}
+        </button>
+      )}
       {!done && <LifecyclePanel detail={detail} options={options} source="kiln_qr" onDone={onDone} />}
       {done && detail.can.next_steps.length > 0 && (
         <button onClick={() => setDone(null)} className="kc-key kc-key--block">
