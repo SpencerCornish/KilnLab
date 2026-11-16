@@ -10,6 +10,12 @@ export const STEP_LABELS: Partial<Record<FiringStatus, string>> = {
   completed: 'Unloaded: ready for pickup',
 }
 
+/** Permanent sub-text under each step button; explains what the action records. */
+const STEP_HINTS: Partial<Record<FiringStatus, string>> = {
+  firing: 'Records the start; cool and unload times follow.',
+  completed: 'Tells everyone their work is ready to collect.',
+}
+
 /** Offers the next valid steps for this user and runs the confirm screen. */
 export function LifecyclePanel({
   detail,
@@ -49,9 +55,10 @@ export function LifecyclePanel({
         <button
           key={s}
           onClick={() => setStep(s)}
-          className={`kc-key kc-key--block ${s === 'firing' ? 'kc-key--fire kc-key--lg' : ''}`}
+          className={`kc-key kc-key--block kc-key--sub ${s === 'firing' ? 'kc-key--fire kc-key--lg' : ''}`}
         >
           {STEP_LABELS[s] ?? STATUS_LABELS[s]}
+          {STEP_HINTS[s] && <span className="kc-key__sub">{STEP_HINTS[s]}</span>}
         </button>
       ))}
     </div>

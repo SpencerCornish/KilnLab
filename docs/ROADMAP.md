@@ -20,6 +20,8 @@ _2026-11-14 UI declutter (branch `ui-clutter`, not yet merged): firing page cons
 
 _2026-11-16 firing ownership + profiles (branch `feature/firing-ownership-profiles`): the pre-prod schema was reset to a single clean baseline. Firing profiles are per kiln (name, type, cone, rough firing/cooldown times) and chosen by the proposer, with an **Other** custom option. Confirm is replaced by **Take this firing** (`managed_by_user_id`); routine alerts go only to the owner, or all KMs while unclaimed, with missed-start/unload escalation. Cooling is automatic at `started_at + firing_minutes`; "ready to unload" is derived from the profile's cooldown; anyone can unload early. Loading/loaded and the redundant unloaded/ready timestamps are gone. **No data migration** — `make db-reset` is required. See [DECISIONS](DECISIONS.md) D52–D57._
 
+_2026-11-16 button sub-text: kiln-master controls and lifecycle steps now show a permanent one-line explanation under the label (e.g. Change profile — "Swap the program, timing or cone"; START FIRING — "Records the start; cool and unload times follow") using `.kc-key--sub` / `.kc-key__sub`. Obvious buttons stay plain._
+
 
 ---
 

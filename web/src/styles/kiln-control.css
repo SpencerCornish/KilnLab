@@ -47,6 +47,14 @@ a { color: var(--cobalt); }
 .kc-key--sm { min-height: 48px; padding: 4px var(--space-2); font-size: 15px; line-height: 17px; }
 .kc-key--icon { width: 48px; height: 48px; min-height: 48px; padding: 0; flex: none; }
 .kc-key--block { display: flex; width: 100%; }
+/* Key with a permanent line of explanation under the label. */
+.kc-key--sub { flex-direction: column; gap: 2px; padding: 6px var(--space-3) 7px; }
+.kc-key--lg.kc-key--sub { padding: 8px var(--space-4) 10px; }
+.kc-key__sub {
+  display: block; font: 500 14px/18px var(--font-sans);
+  letter-spacing: 0; text-transform: none; opacity: .8;
+}
+.kc-key:disabled .kc-key__sub { opacity: 1; }
 .kc-key:disabled, .kc-key[aria-disabled="true"] {
   background: var(--panel); color: var(--ink-muted); border: 1px dashed var(--rule);
   box-shadow: none; transform: none; cursor: not-allowed;

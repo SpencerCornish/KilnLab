@@ -166,13 +166,19 @@ export default function FiringPage() {
         <section className="space-y-4">
           <h2 className="kc-title kc-title--sm">Actions</h2>
           {can.claim && (
-            <button disabled={busy} onClick={() => run(() => act.claim(f.id))} className="kc-key kc-key--block kc-key--fire kc-key--lg">
+            <button
+              disabled={busy}
+              onClick={() => run(() => act.claim(f.id))}
+              className="kc-key kc-key--block kc-key--sub kc-key--fire kc-key--lg"
+            >
               Take this firing
+              <span className="kc-key__sub">Become the kiln master who runs it.</span>
             </button>
           )}
           {canTakeOver && (
-            <button onClick={() => setSheet({ kind: 'takeover' })} className="kc-key kc-key--block kc-key--go">
+            <button onClick={() => setSheet({ kind: 'takeover' })} className="kc-key kc-key--block kc-key--sub kc-key--go">
               Take over from {f.managed_by?.name}
+              <span className="kc-key__sub">You become responsible for this firing.</span>
             </button>
           )}
           <LifecyclePanel
@@ -186,24 +192,41 @@ export default function FiringPage() {
           />
           {kmControls && (
             <div className="kc-keys kc-keys--grid">
-              {can.unclaim && <KmButton onClick={() => setSheet({ kind: 'unclaim' })}>Drop this firing</KmButton>}
-              {can.change_profile && <KmButton onClick={() => setSheet({ kind: 'changeProfile' })}>Change profile</KmButton>}
+              {can.unclaim && <KmButton onClick={() => setSheet({ kind: 'unclaim' })} label="Drop this firing" sub="Hand it back to other kiln masters." />}
+              {can.change_profile && (
+                <KmButton
+                  onClick={() => setSheet({ kind: 'changeProfile' })}
+                  label="Change profile"
+                  sub="Swap the program, timing or cone."
+                />
+              )}
               {can.release && (
-                <button onClick={() => setSheet({ kind: 'release' })} className="kc-key kc-key--go">
+                <button onClick={() => setSheet({ kind: 'release' })} className="kc-key kc-key--sub kc-key--go">
                   Release hold
+                  <span className="kc-key__sub">Put it back on the schedule.</span>
                 </button>
               )}
-              {can.reschedule && <KmButton onClick={() => setSheet({ kind: 'reschedule' })}>Reschedule</KmButton>}
-              {can.hold && <KmButton onClick={() => setSheet({ kind: 'hold' })}>Put on hold</KmButton>}
-              {can.manage && <KmButton onClick={() => setSheet({ kind: 'fullness' })}>Set fullness</KmButton>}
+              {can.reschedule && (
+                <KmButton onClick={() => setSheet({ kind: 'reschedule' })} label="Reschedule" sub="Pick a different day." />
+              )}
+              {can.hold && (
+                <KmButton onClick={() => setSheet({ kind: 'hold' })} label="Put on hold" sub="Pause it; don't cancel." />
+              )}
               {can.manage && (
-                <KmButton disabled={busy} onClick={() => run(() => act.setRequestsClosed(f.id, f.requests_open))}>
-                  {f.requests_open ? 'Close requests' : 'Reopen requests'}
-                </KmButton>
+                <KmButton onClick={() => setSheet({ kind: 'fullness' })} label="Set fullness" sub="Override the calculated number." />
+              )}
+              {can.manage && (
+                <KmButton
+                  disabled={busy}
+                  onClick={() => run(() => act.setRequestsClosed(f.id, f.requests_open))}
+                  label={f.requests_open ? 'Close requests' : 'Reopen requests'}
+                  sub={f.requests_open ? 'Stop new requests.' : 'Allow new requests again.'}
+                />
               )}
               {can.cancel && (
-                <button onClick={() => setSheet({ kind: 'cancel' })} className="kc-key kc-key--block kc-key--danger">
+                <button onClick={() => setSheet({ kind: 'cancel' })} className="kc-key kc-key--block kc-key--sub kc-key--danger">
                   Cancel firing
+                  <span className="kc-key__sub">Call it off; everyone is told.</span>
                 </button>
               )}
             </div>
@@ -265,10 +288,11 @@ export default function FiringPage() {
   )
 }
 
-function KmButton({ children, ...props }: { children: ReactNode; onClick: () => void; disabled?: boolean }) {
+function KmButton({ label, sub, ...props }: { label: string; sub: string; onClick: () => void; disabled?: boolean }) {
   return (
-    <button {...props} className="kc-key flex-1">
-      {children}
+    <button {...props} className="kc-key kc-key--sub flex-1">
+      {label}
+      <span className="kc-key__sub">{sub}</span>
     </button>
   )
 }
