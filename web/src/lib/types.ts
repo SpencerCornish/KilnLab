@@ -160,6 +160,23 @@ export interface Kiln {
   share_per_shelf_pct: number | null
 }
 
+export interface Blackout {
+  id: number
+  kiln_id: number
+  /** YYYY-MM-DD, inclusive. */
+  start_date: string
+  /** YYYY-MM-DD, inclusive. */
+  end_date: string
+  reason: string
+}
+
+export interface BlackoutInput {
+  kiln_id: number
+  start_date: string
+  end_date: string
+  reason: string
+}
+
 export interface Options {
   timezone: string
   min_notice_hours: number
@@ -169,6 +186,8 @@ export interface Options {
   /** Active kilns first; inactive ones are kept so old firings still show their kiln. */
   kilns: Kiln[]
   programs: Program[]
+  /** Dates each kiln can't take new firings. */
+  blackouts: Blackout[]
 }
 
 export interface Program {
@@ -294,6 +313,7 @@ export interface Settings {
   slack_channel_id: string
   missed_start_grace_minutes: number
   missed_unload_grace_minutes: number
+  day_reminder_hour: number
   public_page_days_ahead: number
 }
 

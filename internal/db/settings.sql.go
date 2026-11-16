@@ -86,7 +86,7 @@ func (q *Queries) GetKiln(ctx context.Context, id int64) (Kiln, error) {
 }
 
 const getSettings = `-- name: GetSettings :one
-SELECT id, timezone, min_notice_hours, request_cutoff_hours, underfilled_threshold_pct, firing_types, cones, programs, discord_channel_id, slack_channel_id, missed_start_grace_minutes, missed_unload_grace_minutes, public_page_days_ahead, updated_at FROM settings WHERE id = 1
+SELECT id, timezone, min_notice_hours, request_cutoff_hours, underfilled_threshold_pct, firing_types, cones, programs, discord_channel_id, slack_channel_id, missed_start_grace_minutes, missed_unload_grace_minutes, public_page_days_ahead, updated_at, day_reminder_hour FROM settings WHERE id = 1
 `
 
 func (q *Queries) GetSettings(ctx context.Context) (Setting, error) {
@@ -107,6 +107,7 @@ func (q *Queries) GetSettings(ctx context.Context) (Setting, error) {
 		&i.MissedUnloadGraceMinutes,
 		&i.PublicPageDaysAhead,
 		&i.UpdatedAt,
+		&i.DayReminderHour,
 	)
 	return i, err
 }
@@ -212,10 +213,11 @@ SET timezone = $1,
     slack_channel_id = $9,
     missed_start_grace_minutes = $10,
     missed_unload_grace_minutes = $11,
-    public_page_days_ahead = $12,
+    day_reminder_hour = $12,
+    public_page_days_ahead = $13,
     updated_at = now()
 WHERE id = 1
-RETURNING id, timezone, min_notice_hours, request_cutoff_hours, underfilled_threshold_pct, firing_types, cones, programs, discord_channel_id, slack_channel_id, missed_start_grace_minutes, missed_unload_grace_minutes, public_page_days_ahead, updated_at
+RETURNING id, timezone, min_notice_hours, request_cutoff_hours, underfilled_threshold_pct, firing_types, cones, programs, discord_channel_id, slack_channel_id, missed_start_grace_minutes, missed_unload_grace_minutes, public_page_days_ahead, updated_at, day_reminder_hour
 `
 
 type UpdateSettingsParams struct {
@@ -230,6 +232,7 @@ type UpdateSettingsParams struct {
 	SlackChannelID           string          `json:"slack_channel_id"`
 	MissedStartGraceMinutes  int32           `json:"missed_start_grace_minutes"`
 	MissedUnloadGraceMinutes int32           `json:"missed_unload_grace_minutes"`
+	DayReminderHour          int32           `json:"day_reminder_hour"`
 	PublicPageDaysAhead      int32           `json:"public_page_days_ahead"`
 }
 
@@ -246,6 +249,7 @@ func (q *Queries) UpdateSettings(ctx context.Context, arg UpdateSettingsParams) 
 		arg.SlackChannelID,
 		arg.MissedStartGraceMinutes,
 		arg.MissedUnloadGraceMinutes,
+		arg.DayReminderHour,
 		arg.PublicPageDaysAhead,
 	)
 	var i Setting
@@ -264,6 +268,7 @@ func (q *Queries) UpdateSettings(ctx context.Context, arg UpdateSettingsParams) 
 		&i.MissedUnloadGraceMinutes,
 		&i.PublicPageDaysAhead,
 		&i.UpdatedAt,
+		&i.DayReminderHour,
 	)
 	return i, err
 }

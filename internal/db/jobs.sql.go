@@ -19,6 +19,8 @@ WHERE (status IN ('proposed', 'on_hold', 'confirmed') AND requests_close_handled
        AND scheduled_date <= $2)
    OR (status IN ('firing', 'cooling') AND missed_unload_reminder_sent_at IS NULL
        AND estimated_unload_at <= $1)
+   OR (status IN ('proposed', 'on_hold', 'confirmed', 'loading', 'loaded') AND day_reminder_sent_at IS NULL
+       AND scheduled_date <= $2)
 ORDER BY id
 `
 
@@ -54,9 +56,10 @@ UPDATE firings
 SET requests_close_handled_at = COALESCE($1, requests_close_handled_at),
     underfilled_alert_sent_at = COALESCE($2, underfilled_alert_sent_at),
     missed_start_reminder_sent_at = COALESCE($3, missed_start_reminder_sent_at),
-    missed_unload_reminder_sent_at = COALESCE($4, missed_unload_reminder_sent_at)
-WHERE id = $5
-RETURNING id, kiln_id, proposed_by_user_id, firing_type, cone, title, notes, status, was_confirmed, hold_reason, cancel_reason, proposer_description, proposer_share_pct, proposer_cone, proposer_clay_body, fullness_override_pct, requests_close_at, requests_closed_manually, program, estimated_duration_minutes, started_at, estimated_unload_at, cooling_at, unloaded_at, ready_for_pickup_at, completed_at, underfilled_alert_sent_at, missed_start_reminder_sent_at, missed_unload_reminder_sent_at, created_at, updated_at, requests_close_handled_at, scheduled_date
+    missed_unload_reminder_sent_at = COALESCE($4, missed_unload_reminder_sent_at),
+    day_reminder_sent_at = COALESCE($5, day_reminder_sent_at)
+WHERE id = $6
+RETURNING id, kiln_id, proposed_by_user_id, firing_type, cone, title, notes, status, was_confirmed, hold_reason, cancel_reason, proposer_description, proposer_share_pct, proposer_cone, proposer_clay_body, fullness_override_pct, requests_close_at, requests_closed_manually, program, estimated_duration_minutes, started_at, estimated_unload_at, cooling_at, unloaded_at, ready_for_pickup_at, completed_at, underfilled_alert_sent_at, missed_start_reminder_sent_at, missed_unload_reminder_sent_at, created_at, updated_at, requests_close_handled_at, scheduled_date, day_reminder_sent_at
 `
 
 type MarkJobsDoneParams struct {
@@ -64,6 +67,7 @@ type MarkJobsDoneParams struct {
 	UnderfilledAlertSentAt     *time.Time `json:"underfilled_alert_sent_at"`
 	MissedStartReminderSentAt  *time.Time `json:"missed_start_reminder_sent_at"`
 	MissedUnloadReminderSentAt *time.Time `json:"missed_unload_reminder_sent_at"`
+	DayReminderSentAt          *time.Time `json:"day_reminder_sent_at"`
 	ID                         int64      `json:"id"`
 }
 
@@ -74,6 +78,7 @@ func (q *Queries) MarkJobsDone(ctx context.Context, arg MarkJobsDoneParams) (Fir
 		arg.UnderfilledAlertSentAt,
 		arg.MissedStartReminderSentAt,
 		arg.MissedUnloadReminderSentAt,
+		arg.DayReminderSentAt,
 		arg.ID,
 	)
 	var i Firing
@@ -111,6 +116,7 @@ func (q *Queries) MarkJobsDone(ctx context.Context, arg MarkJobsDoneParams) (Fir
 		&i.UpdatedAt,
 		&i.RequestsCloseHandledAt,
 		&i.ScheduledDate,
+		&i.DayReminderSentAt,
 	)
 	return i, err
 }

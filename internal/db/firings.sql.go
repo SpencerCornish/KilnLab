@@ -24,7 +24,7 @@ SET status = $1,
     completed_at = COALESCE($9, completed_at),
     updated_at = now()
 WHERE id = $10
-RETURNING id, kiln_id, proposed_by_user_id, firing_type, cone, title, notes, status, was_confirmed, hold_reason, cancel_reason, proposer_description, proposer_share_pct, proposer_cone, proposer_clay_body, fullness_override_pct, requests_close_at, requests_closed_manually, program, estimated_duration_minutes, started_at, estimated_unload_at, cooling_at, unloaded_at, ready_for_pickup_at, completed_at, underfilled_alert_sent_at, missed_start_reminder_sent_at, missed_unload_reminder_sent_at, created_at, updated_at, requests_close_handled_at, scheduled_date
+RETURNING id, kiln_id, proposed_by_user_id, firing_type, cone, title, notes, status, was_confirmed, hold_reason, cancel_reason, proposer_description, proposer_share_pct, proposer_cone, proposer_clay_body, fullness_override_pct, requests_close_at, requests_closed_manually, program, estimated_duration_minutes, started_at, estimated_unload_at, cooling_at, unloaded_at, ready_for_pickup_at, completed_at, underfilled_alert_sent_at, missed_start_reminder_sent_at, missed_unload_reminder_sent_at, created_at, updated_at, requests_close_handled_at, scheduled_date, day_reminder_sent_at
 `
 
 type AdvanceFiringParams struct {
@@ -90,6 +90,7 @@ func (q *Queries) AdvanceFiring(ctx context.Context, arg AdvanceFiringParams) (F
 		&i.UpdatedAt,
 		&i.RequestsCloseHandledAt,
 		&i.ScheduledDate,
+		&i.DayReminderSentAt,
 	)
 	return i, err
 }
@@ -129,7 +130,7 @@ SET started_at = $1,
     completed_at = $6,
     updated_at = now()
 WHERE id = $7
-RETURNING id, kiln_id, proposed_by_user_id, firing_type, cone, title, notes, status, was_confirmed, hold_reason, cancel_reason, proposer_description, proposer_share_pct, proposer_cone, proposer_clay_body, fullness_override_pct, requests_close_at, requests_closed_manually, program, estimated_duration_minutes, started_at, estimated_unload_at, cooling_at, unloaded_at, ready_for_pickup_at, completed_at, underfilled_alert_sent_at, missed_start_reminder_sent_at, missed_unload_reminder_sent_at, created_at, updated_at, requests_close_handled_at, scheduled_date
+RETURNING id, kiln_id, proposed_by_user_id, firing_type, cone, title, notes, status, was_confirmed, hold_reason, cancel_reason, proposer_description, proposer_share_pct, proposer_cone, proposer_clay_body, fullness_override_pct, requests_close_at, requests_closed_manually, program, estimated_duration_minutes, started_at, estimated_unload_at, cooling_at, unloaded_at, ready_for_pickup_at, completed_at, underfilled_alert_sent_at, missed_start_reminder_sent_at, missed_unload_reminder_sent_at, created_at, updated_at, requests_close_handled_at, scheduled_date, day_reminder_sent_at
 `
 
 type CorrectTimestampsParams struct {
@@ -188,6 +189,7 @@ func (q *Queries) CorrectTimestamps(ctx context.Context, arg CorrectTimestampsPa
 		&i.UpdatedAt,
 		&i.RequestsCloseHandledAt,
 		&i.ScheduledDate,
+		&i.DayReminderSentAt,
 	)
 	return i, err
 }
@@ -200,7 +202,7 @@ INSERT INTO firings (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
 )
-RETURNING id, kiln_id, proposed_by_user_id, firing_type, cone, title, notes, status, was_confirmed, hold_reason, cancel_reason, proposer_description, proposer_share_pct, proposer_cone, proposer_clay_body, fullness_override_pct, requests_close_at, requests_closed_manually, program, estimated_duration_minutes, started_at, estimated_unload_at, cooling_at, unloaded_at, ready_for_pickup_at, completed_at, underfilled_alert_sent_at, missed_start_reminder_sent_at, missed_unload_reminder_sent_at, created_at, updated_at, requests_close_handled_at, scheduled_date
+RETURNING id, kiln_id, proposed_by_user_id, firing_type, cone, title, notes, status, was_confirmed, hold_reason, cancel_reason, proposer_description, proposer_share_pct, proposer_cone, proposer_clay_body, fullness_override_pct, requests_close_at, requests_closed_manually, program, estimated_duration_minutes, started_at, estimated_unload_at, cooling_at, unloaded_at, ready_for_pickup_at, completed_at, underfilled_alert_sent_at, missed_start_reminder_sent_at, missed_unload_reminder_sent_at, created_at, updated_at, requests_close_handled_at, scheduled_date, day_reminder_sent_at
 `
 
 type CreateFiringParams struct {
@@ -269,6 +271,7 @@ func (q *Queries) CreateFiring(ctx context.Context, arg CreateFiringParams) (Fir
 		&i.UpdatedAt,
 		&i.RequestsCloseHandledAt,
 		&i.ScheduledDate,
+		&i.DayReminderSentAt,
 	)
 	return i, err
 }
@@ -370,7 +373,7 @@ func (q *Queries) DecideRequest(ctx context.Context, arg DecideRequestParams) (F
 }
 
 const getFiring = `-- name: GetFiring :one
-SELECT id, kiln_id, proposed_by_user_id, firing_type, cone, title, notes, status, was_confirmed, hold_reason, cancel_reason, proposer_description, proposer_share_pct, proposer_cone, proposer_clay_body, fullness_override_pct, requests_close_at, requests_closed_manually, program, estimated_duration_minutes, started_at, estimated_unload_at, cooling_at, unloaded_at, ready_for_pickup_at, completed_at, underfilled_alert_sent_at, missed_start_reminder_sent_at, missed_unload_reminder_sent_at, created_at, updated_at, requests_close_handled_at, scheduled_date FROM firings WHERE id = $1
+SELECT id, kiln_id, proposed_by_user_id, firing_type, cone, title, notes, status, was_confirmed, hold_reason, cancel_reason, proposer_description, proposer_share_pct, proposer_cone, proposer_clay_body, fullness_override_pct, requests_close_at, requests_closed_manually, program, estimated_duration_minutes, started_at, estimated_unload_at, cooling_at, unloaded_at, ready_for_pickup_at, completed_at, underfilled_alert_sent_at, missed_start_reminder_sent_at, missed_unload_reminder_sent_at, created_at, updated_at, requests_close_handled_at, scheduled_date, day_reminder_sent_at FROM firings WHERE id = $1
 `
 
 func (q *Queries) GetFiring(ctx context.Context, id int64) (Firing, error) {
@@ -410,12 +413,13 @@ func (q *Queries) GetFiring(ctx context.Context, id int64) (Firing, error) {
 		&i.UpdatedAt,
 		&i.RequestsCloseHandledAt,
 		&i.ScheduledDate,
+		&i.DayReminderSentAt,
 	)
 	return i, err
 }
 
 const getFiringForUpdate = `-- name: GetFiringForUpdate :one
-SELECT id, kiln_id, proposed_by_user_id, firing_type, cone, title, notes, status, was_confirmed, hold_reason, cancel_reason, proposer_description, proposer_share_pct, proposer_cone, proposer_clay_body, fullness_override_pct, requests_close_at, requests_closed_manually, program, estimated_duration_minutes, started_at, estimated_unload_at, cooling_at, unloaded_at, ready_for_pickup_at, completed_at, underfilled_alert_sent_at, missed_start_reminder_sent_at, missed_unload_reminder_sent_at, created_at, updated_at, requests_close_handled_at, scheduled_date FROM firings WHERE id = $1 FOR UPDATE
+SELECT id, kiln_id, proposed_by_user_id, firing_type, cone, title, notes, status, was_confirmed, hold_reason, cancel_reason, proposer_description, proposer_share_pct, proposer_cone, proposer_clay_body, fullness_override_pct, requests_close_at, requests_closed_manually, program, estimated_duration_minutes, started_at, estimated_unload_at, cooling_at, unloaded_at, ready_for_pickup_at, completed_at, underfilled_alert_sent_at, missed_start_reminder_sent_at, missed_unload_reminder_sent_at, created_at, updated_at, requests_close_handled_at, scheduled_date, day_reminder_sent_at FROM firings WHERE id = $1 FOR UPDATE
 `
 
 func (q *Queries) GetFiringForUpdate(ctx context.Context, id int64) (Firing, error) {
@@ -455,6 +459,7 @@ func (q *Queries) GetFiringForUpdate(ctx context.Context, id int64) (Firing, err
 		&i.UpdatedAt,
 		&i.RequestsCloseHandledAt,
 		&i.ScheduledDate,
+		&i.DayReminderSentAt,
 	)
 	return i, err
 }
@@ -638,7 +643,7 @@ func (q *Queries) ListFiringParticipants(ctx context.Context, firingIds []int64)
 }
 
 const listFiringSummaries = `-- name: ListFiringSummaries :many
-SELECT f.id, f.kiln_id, f.proposed_by_user_id, f.firing_type, f.cone, f.title, f.notes, f.status, f.was_confirmed, f.hold_reason, f.cancel_reason, f.proposer_description, f.proposer_share_pct, f.proposer_cone, f.proposer_clay_body, f.fullness_override_pct, f.requests_close_at, f.requests_closed_manually, f.program, f.estimated_duration_minutes, f.started_at, f.estimated_unload_at, f.cooling_at, f.unloaded_at, f.ready_for_pickup_at, f.completed_at, f.underfilled_alert_sent_at, f.missed_start_reminder_sent_at, f.missed_unload_reminder_sent_at, f.created_at, f.updated_at, f.requests_close_handled_at, f.scheduled_date,
+SELECT f.id, f.kiln_id, f.proposed_by_user_id, f.firing_type, f.cone, f.title, f.notes, f.status, f.was_confirmed, f.hold_reason, f.cancel_reason, f.proposer_description, f.proposer_share_pct, f.proposer_cone, f.proposer_clay_body, f.fullness_override_pct, f.requests_close_at, f.requests_closed_manually, f.program, f.estimated_duration_minutes, f.started_at, f.estimated_unload_at, f.cooling_at, f.unloaded_at, f.ready_for_pickup_at, f.completed_at, f.underfilled_alert_sent_at, f.missed_start_reminder_sent_at, f.missed_unload_reminder_sent_at, f.created_at, f.updated_at, f.requests_close_handled_at, f.scheduled_date, f.day_reminder_sent_at,
        u.display_name AS proposer_name,
        COALESCE((SELECT sum(r.estimated_share_pct) FROM firing_requests r
                  WHERE r.firing_id = f.id AND r.status = 'approved'), 0)::int AS approved_share_pct,
@@ -713,6 +718,7 @@ func (q *Queries) ListFiringSummaries(ctx context.Context, arg ListFiringSummari
 			&i.Firing.UpdatedAt,
 			&i.Firing.RequestsCloseHandledAt,
 			&i.Firing.ScheduledDate,
+			&i.Firing.DayReminderSentAt,
 			&i.ProposerName,
 			&i.ApprovedSharePct,
 			&i.ApprovedCount,
@@ -730,7 +736,7 @@ func (q *Queries) ListFiringSummaries(ctx context.Context, arg ListFiringSummari
 }
 
 const listKilnCandidates = `-- name: ListKilnCandidates :many
-SELECT f.id, f.kiln_id, f.proposed_by_user_id, f.firing_type, f.cone, f.title, f.notes, f.status, f.was_confirmed, f.hold_reason, f.cancel_reason, f.proposer_description, f.proposer_share_pct, f.proposer_cone, f.proposer_clay_body, f.fullness_override_pct, f.requests_close_at, f.requests_closed_manually, f.program, f.estimated_duration_minutes, f.started_at, f.estimated_unload_at, f.cooling_at, f.unloaded_at, f.ready_for_pickup_at, f.completed_at, f.underfilled_alert_sent_at, f.missed_start_reminder_sent_at, f.missed_unload_reminder_sent_at, f.created_at, f.updated_at, f.requests_close_handled_at, f.scheduled_date, u.display_name AS proposer_name
+SELECT f.id, f.kiln_id, f.proposed_by_user_id, f.firing_type, f.cone, f.title, f.notes, f.status, f.was_confirmed, f.hold_reason, f.cancel_reason, f.proposer_description, f.proposer_share_pct, f.proposer_cone, f.proposer_clay_body, f.fullness_override_pct, f.requests_close_at, f.requests_closed_manually, f.program, f.estimated_duration_minutes, f.started_at, f.estimated_unload_at, f.cooling_at, f.unloaded_at, f.ready_for_pickup_at, f.completed_at, f.underfilled_alert_sent_at, f.missed_start_reminder_sent_at, f.missed_unload_reminder_sent_at, f.created_at, f.updated_at, f.requests_close_handled_at, f.scheduled_date, f.day_reminder_sent_at, u.display_name AS proposer_name
 FROM firings f
 JOIN users u ON u.id = f.proposed_by_user_id
 WHERE ($1::bigint = 0 OR f.kiln_id = $1)
@@ -795,6 +801,7 @@ func (q *Queries) ListKilnCandidates(ctx context.Context, arg ListKilnCandidates
 			&i.Firing.UpdatedAt,
 			&i.Firing.RequestsCloseHandledAt,
 			&i.Firing.ScheduledDate,
+			&i.Firing.DayReminderSentAt,
 			&i.ProposerName,
 		); err != nil {
 			return nil, err
@@ -868,9 +875,10 @@ SET scheduled_date = $1,
     underfilled_alert_sent_at = NULL,
     missed_start_reminder_sent_at = NULL,
     requests_close_handled_at = NULL,
+    day_reminder_sent_at = NULL,
     updated_at = now()
 WHERE id = $3
-RETURNING id, kiln_id, proposed_by_user_id, firing_type, cone, title, notes, status, was_confirmed, hold_reason, cancel_reason, proposer_description, proposer_share_pct, proposer_cone, proposer_clay_body, fullness_override_pct, requests_close_at, requests_closed_manually, program, estimated_duration_minutes, started_at, estimated_unload_at, cooling_at, unloaded_at, ready_for_pickup_at, completed_at, underfilled_alert_sent_at, missed_start_reminder_sent_at, missed_unload_reminder_sent_at, created_at, updated_at, requests_close_handled_at, scheduled_date
+RETURNING id, kiln_id, proposed_by_user_id, firing_type, cone, title, notes, status, was_confirmed, hold_reason, cancel_reason, proposer_description, proposer_share_pct, proposer_cone, proposer_clay_body, fullness_override_pct, requests_close_at, requests_closed_manually, program, estimated_duration_minutes, started_at, estimated_unload_at, cooling_at, unloaded_at, ready_for_pickup_at, completed_at, underfilled_alert_sent_at, missed_start_reminder_sent_at, missed_unload_reminder_sent_at, created_at, updated_at, requests_close_handled_at, scheduled_date, day_reminder_sent_at
 `
 
 type RescheduleFiringParams struct {
@@ -917,6 +925,7 @@ func (q *Queries) RescheduleFiring(ctx context.Context, arg RescheduleFiringPara
 		&i.UpdatedAt,
 		&i.RequestsCloseHandledAt,
 		&i.ScheduledDate,
+		&i.DayReminderSentAt,
 	)
 	return i, err
 }
@@ -929,7 +938,7 @@ SET status = $1,
     cancel_reason = $4,
     updated_at = now()
 WHERE id = $5
-RETURNING id, kiln_id, proposed_by_user_id, firing_type, cone, title, notes, status, was_confirmed, hold_reason, cancel_reason, proposer_description, proposer_share_pct, proposer_cone, proposer_clay_body, fullness_override_pct, requests_close_at, requests_closed_manually, program, estimated_duration_minutes, started_at, estimated_unload_at, cooling_at, unloaded_at, ready_for_pickup_at, completed_at, underfilled_alert_sent_at, missed_start_reminder_sent_at, missed_unload_reminder_sent_at, created_at, updated_at, requests_close_handled_at, scheduled_date
+RETURNING id, kiln_id, proposed_by_user_id, firing_type, cone, title, notes, status, was_confirmed, hold_reason, cancel_reason, proposer_description, proposer_share_pct, proposer_cone, proposer_clay_body, fullness_override_pct, requests_close_at, requests_closed_manually, program, estimated_duration_minutes, started_at, estimated_unload_at, cooling_at, unloaded_at, ready_for_pickup_at, completed_at, underfilled_alert_sent_at, missed_start_reminder_sent_at, missed_unload_reminder_sent_at, created_at, updated_at, requests_close_handled_at, scheduled_date, day_reminder_sent_at
 `
 
 type SetFiringStatusParams struct {
@@ -983,6 +992,7 @@ func (q *Queries) SetFiringStatus(ctx context.Context, arg SetFiringStatusParams
 		&i.UpdatedAt,
 		&i.RequestsCloseHandledAt,
 		&i.ScheduledDate,
+		&i.DayReminderSentAt,
 	)
 	return i, err
 }
@@ -990,7 +1000,7 @@ func (q *Queries) SetFiringStatus(ctx context.Context, arg SetFiringStatusParams
 const setFullnessOverride = `-- name: SetFullnessOverride :one
 UPDATE firings SET fullness_override_pct = $1, updated_at = now()
 WHERE id = $2
-RETURNING id, kiln_id, proposed_by_user_id, firing_type, cone, title, notes, status, was_confirmed, hold_reason, cancel_reason, proposer_description, proposer_share_pct, proposer_cone, proposer_clay_body, fullness_override_pct, requests_close_at, requests_closed_manually, program, estimated_duration_minutes, started_at, estimated_unload_at, cooling_at, unloaded_at, ready_for_pickup_at, completed_at, underfilled_alert_sent_at, missed_start_reminder_sent_at, missed_unload_reminder_sent_at, created_at, updated_at, requests_close_handled_at, scheduled_date
+RETURNING id, kiln_id, proposed_by_user_id, firing_type, cone, title, notes, status, was_confirmed, hold_reason, cancel_reason, proposer_description, proposer_share_pct, proposer_cone, proposer_clay_body, fullness_override_pct, requests_close_at, requests_closed_manually, program, estimated_duration_minutes, started_at, estimated_unload_at, cooling_at, unloaded_at, ready_for_pickup_at, completed_at, underfilled_alert_sent_at, missed_start_reminder_sent_at, missed_unload_reminder_sent_at, created_at, updated_at, requests_close_handled_at, scheduled_date, day_reminder_sent_at
 `
 
 type SetFullnessOverrideParams struct {
@@ -1035,6 +1045,7 @@ func (q *Queries) SetFullnessOverride(ctx context.Context, arg SetFullnessOverri
 		&i.UpdatedAt,
 		&i.RequestsCloseHandledAt,
 		&i.ScheduledDate,
+		&i.DayReminderSentAt,
 	)
 	return i, err
 }
@@ -1047,7 +1058,7 @@ SET requests_closed_manually = $1,
     underfilled_alert_sent_at = NULL,
     updated_at = now()
 WHERE id = $3
-RETURNING id, kiln_id, proposed_by_user_id, firing_type, cone, title, notes, status, was_confirmed, hold_reason, cancel_reason, proposer_description, proposer_share_pct, proposer_cone, proposer_clay_body, fullness_override_pct, requests_close_at, requests_closed_manually, program, estimated_duration_minutes, started_at, estimated_unload_at, cooling_at, unloaded_at, ready_for_pickup_at, completed_at, underfilled_alert_sent_at, missed_start_reminder_sent_at, missed_unload_reminder_sent_at, created_at, updated_at, requests_close_handled_at, scheduled_date
+RETURNING id, kiln_id, proposed_by_user_id, firing_type, cone, title, notes, status, was_confirmed, hold_reason, cancel_reason, proposer_description, proposer_share_pct, proposer_cone, proposer_clay_body, fullness_override_pct, requests_close_at, requests_closed_manually, program, estimated_duration_minutes, started_at, estimated_unload_at, cooling_at, unloaded_at, ready_for_pickup_at, completed_at, underfilled_alert_sent_at, missed_start_reminder_sent_at, missed_unload_reminder_sent_at, created_at, updated_at, requests_close_handled_at, scheduled_date, day_reminder_sent_at
 `
 
 type SetRequestsWindowParams struct {
@@ -1094,6 +1105,7 @@ func (q *Queries) SetRequestsWindow(ctx context.Context, arg SetRequestsWindowPa
 		&i.UpdatedAt,
 		&i.RequestsCloseHandledAt,
 		&i.ScheduledDate,
+		&i.DayReminderSentAt,
 	)
 	return i, err
 }

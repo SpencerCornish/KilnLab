@@ -67,6 +67,7 @@ SET scheduled_date = sqlc.arg(scheduled_date),
     underfilled_alert_sent_at = NULL,
     missed_start_reminder_sent_at = NULL,
     requests_close_handled_at = NULL,
+    day_reminder_sent_at = NULL,
     updated_at = now()
 WHERE id = sqlc.arg(id)
 RETURNING *;

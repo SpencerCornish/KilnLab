@@ -106,7 +106,8 @@ func TestScheduledJobs(t *testing.T) {
 	}
 	tick(0)
 
-	// The timeline shows what the system did.
+	// The timeline shows what the system did: under-filled, second close,
+	// missed start, missed unload, and the day-of reminder.
 	d = alice.mustDo("GET", base, nil, http.StatusOK)
 	alerts := 0
 	for _, ev := range d["events"].([]any) {
@@ -114,8 +115,77 @@ func TestScheduledJobs(t *testing.T) {
 			alerts++
 		}
 	}
-	if alerts != 4 {
-		t.Fatalf("alert events = %d, want 4", alerts)
+	if alerts != 5 {
+		t.Fatalf("alert events = %d, want 5", alerts)
+	}
+}
+
+// The day-of reminder: kiln masters hear the firing is today at 8am studio time,
+// once, and rescheduling re-arms it for the new day.
+func TestDayOfReminder(t *testing.T) {
+	e, pool := newFiringEnvPool(t, func(c *config.Config) { c.NotificationsDryRun = true })
+	alice := e.login("Alice", false)
+	km := e.login("Kim", true)
+	kimID := int64(jget(km.mustDo("GET", "/api/me", nil, http.StatusOK), "id").(float64))
+
+	runner := jobs.NewRunner(pool, NotifyConfig(&config.Config{AppBaseURL: "http://k", NotificationsDryRun: true}), nil,
+		slog.New(slog.DiscardHandler))
+	runner.Now = func() time.Time { e.mu.Lock(); defer e.mu.Unlock(); return e.now }
+	tick := func(want int) {
+		t.Helper()
+		if n, err := runner.Tick(context.Background()); err != nil || n != want {
+			t.Fatalf("tick: acted %d (want %d), err %v", n, want, err)
+		}
+	}
+	firstDM := func(rows []outboxRow) string {
+		for _, r := range rows {
+			if r.kind == "dm" {
+				return r.text
+			}
+		}
+		return ""
+	}
+
+	dayRef := e.now.Add(72 * time.Hour)
+	d := alice.mustDo("POST", "/api/firings", map[string]any{"firing_type": "glaze", "cone": "6",
+		"scheduled_date": dayOf(dayRef), "description": "mugs", "share_pct": 30}, http.StatusCreated)
+	base := fmt.Sprintf("/api/firings/%d", int64(jget(d, "firing", "id").(float64)))
+	drainOutbox(t, pool)
+
+	// Handle the request cutoff first, so only the day reminder is left.
+	dayStartAt := dayStart(dayRef)
+	e.advance(dayStartAt.Add(-12*time.Hour + time.Minute).Sub(e.now))
+	tick(1)
+	drainOutbox(t, pool)
+
+	reminderAt := dayStartAt.Add(8 * time.Hour) // default day_reminder_hour = 8
+	e.advance(reminderAt.Add(-time.Minute).Sub(e.now))
+	tick(0)
+	e.advance(time.Minute)
+	tick(1)
+	rows := drainOutbox(t, pool)
+	if got := dmRecipients(rows); !slices.Equal(got, []int64{kimID}) || !strings.Contains(firstDM(rows), "is today") {
+		t.Fatalf("day reminder: %v %q", got, firstDM(rows))
+	}
+	for _, r := range rows {
+		if r.kind != "dm" {
+			t.Fatalf("a reminder shouldn't touch the main message: %+v", r)
+		}
+	}
+	tick(0) // exactly once
+
+	// Rescheduling to a new day re-arms it.
+	newDayRef := dayRef.Add(48 * time.Hour)
+	newStart := dayStart(newDayRef)
+	km.mustDo("POST", base+"/reschedule", map[string]any{"scheduled_date": dayOf(newDayRef)}, http.StatusOK)
+	drainOutbox(t, pool)
+	e.advance(newStart.Add(-12*time.Hour + time.Minute).Sub(e.now))
+	tick(1) // the new cutoff
+	drainOutbox(t, pool)
+	e.advance(newStart.Add(8 * time.Hour).Sub(e.now))
+	tick(1)
+	if got := dmRecipients(drainOutbox(t, pool)); !slices.Equal(got, []int64{kimID}) {
+		t.Fatalf("reminder after reschedule = %v", got)
 	}
 }
 

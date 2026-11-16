@@ -495,6 +495,7 @@ type Firing struct {
 	UpdatedAt                  time.Time    `json:"updated_at"`
 	RequestsCloseHandledAt     *time.Time   `json:"requests_close_handled_at"`
 	ScheduledDate              time.Time    `json:"scheduled_date"`
+	DayReminderSentAt          *time.Time   `json:"day_reminder_sent_at"`
 }
 
 type FiringEvent struct {
@@ -539,6 +540,16 @@ type Kiln struct {
 	Active           bool      `json:"active"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+type KilnBlackout struct {
+	ID        int64     `json:"id"`
+	KilnID    int64     `json:"kiln_id"`
+	StartDate time.Time `json:"start_date"`
+	EndDate   time.Time `json:"end_date"`
+	Reason    string    `json:"reason"`
+	CreatedBy *int64    `json:"created_by"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type NotificationMessage struct {
@@ -595,6 +606,7 @@ type Setting struct {
 	MissedUnloadGraceMinutes int32           `json:"missed_unload_grace_minutes"`
 	PublicPageDaysAhead      int32           `json:"public_page_days_ahead"`
 	UpdatedAt                time.Time       `json:"updated_at"`
+	DayReminderHour          int32           `json:"day_reminder_hour"`
 }
 
 type User struct {

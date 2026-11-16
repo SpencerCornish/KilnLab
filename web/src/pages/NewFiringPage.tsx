@@ -35,6 +35,10 @@ function ProposeForm({ options }: { options: Options }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
+  // Days this kiln is blacked out (maintenance and other needs). YYYY-MM-DD strings compare correctly.
+  const blackouts = options.blackouts.filter((b) => b.kiln_id === kilnId)
+  const blocked = blackouts.some((b) => day >= b.start_date && day <= b.end_date)
+
   async function submit(e: FormEvent) {
     e.preventDefault()
     if (!day) return setErr('Pick a day.')
@@ -108,6 +112,16 @@ function ProposeForm({ options }: { options: Options }) {
         hint={
           <span className="kc-caption kc-caption--body block">
             Booked for a day; the kiln runs sometime that day. Requests close {options.request_cutoff_hours}h before.
+            {blackouts.length > 0 && (
+              <>
+                {' '}
+                Unavailable:{' '}
+                {blackouts
+                  .map((b) => (b.start_date === b.end_date ? b.start_date : `${b.start_date}–${b.end_date}`))
+                  .join(', ')}
+                .
+              </>
+            )}
           </span>
         }
       >
@@ -120,6 +134,8 @@ function ProposeForm({ options }: { options: Options }) {
           className={inputClass}
         />
       </Field>
+
+      {blocked && <Alert kind="warning">That day is unavailable for this kiln. Pick another day.</Alert>}
 
       <section className="space-y-4">
         <h2 className="kc-title kc-title--sm">Your work</h2>
@@ -154,7 +170,7 @@ function ProposeForm({ options }: { options: Options }) {
 
       {err && <Alert kind="error">{err}</Alert>}
 
-      <button type="submit" disabled={busy || activeKilns.length === 0} className="kc-key kc-key--block kc-key--fire">
+      <button type="submit" disabled={busy || blocked || activeKilns.length === 0} className="kc-key kc-key--block kc-key--fire">
         {busy ? 'Proposing…' : 'Propose firing'}
       </button>
     </form>

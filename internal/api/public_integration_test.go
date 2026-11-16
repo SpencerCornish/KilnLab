@@ -82,16 +82,18 @@ func TestAdminSettings(t *testing.T) {
 	km.mustDo("GET", "/api/admin/settings", nil, http.StatusForbidden)
 	got := admin.mustDo("GET", "/api/admin/settings", nil, http.StatusOK)
 	st := got["settings"].(map[string]any)
-	if st["timezone"] != "America/Denver" || len(got["kilns"].([]any)) != 1 {
+	if st["timezone"] != "America/Denver" || len(got["kilns"].([]any)) != 1 || st["day_reminder_hour"] != 8.0 {
 		t.Fatalf("settings = %v", got)
 	}
 
 	st["min_notice_hours"] = 24
+	st["day_reminder_hour"] = 6
 	st["cones"] = []string{" 6 ", "10", ""}
 	st["programs"] = []map[string]any{{"name": "Slow glaze", "default_duration_minutes": 600}, {"name": " "}}
 	got = admin.mustDo("PUT", "/api/admin/settings", st, http.StatusOK)
 	st = got["settings"].(map[string]any)
-	if st["min_notice_hours"] != 24.0 || len(st["cones"].([]any)) != 2 || len(st["programs"].([]any)) != 1 {
+	if st["min_notice_hours"] != 24.0 || st["day_reminder_hour"] != 6.0 ||
+		len(st["cones"].([]any)) != 2 || len(st["programs"].([]any)) != 1 {
 		t.Fatalf("after update = %v", st)
 	}
 	opts := km.mustDo("GET", "/api/options", nil, http.StatusOK)
@@ -100,11 +102,12 @@ func TestAdminSettings(t *testing.T) {
 	}
 
 	for name, bad := range map[string]func(map[string]any){
-		"timezone":  func(m map[string]any) { m["timezone"] = "Mars/Olympus" },
-		"dup cone":  func(m map[string]any) { m["cones"] = []string{"6", "6"} },
-		"no types":  func(m map[string]any) { m["firing_types"] = []string{} },
-		"threshold": func(m map[string]any) { m["underfilled_threshold_pct"] = 150 },
-		"days":      func(m map[string]any) { m["public_page_days_ahead"] = 0 },
+		"timezone":      func(m map[string]any) { m["timezone"] = "Mars/Olympus" },
+		"dup cone":      func(m map[string]any) { m["cones"] = []string{"6", "6"} },
+		"no types":      func(m map[string]any) { m["firing_types"] = []string{} },
+		"threshold":     func(m map[string]any) { m["underfilled_threshold_pct"] = 150 },
+		"reminder hour": func(m map[string]any) { m["day_reminder_hour"] = 24 },
+		"days":          func(m map[string]any) { m["public_page_days_ahead"] = 0 },
 	} {
 		m := map[string]any{}
 		for k, v := range st {

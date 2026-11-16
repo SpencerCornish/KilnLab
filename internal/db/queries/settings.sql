@@ -22,6 +22,7 @@ SET timezone = sqlc.arg(timezone),
     slack_channel_id = sqlc.arg(slack_channel_id),
     missed_start_grace_minutes = sqlc.arg(missed_start_grace_minutes),
     missed_unload_grace_minutes = sqlc.arg(missed_unload_grace_minutes),
+    day_reminder_hour = sqlc.arg(day_reminder_hour),
     public_page_days_ahead = sqlc.arg(public_page_days_ahead),
     updated_at = now()
 WHERE id = 1

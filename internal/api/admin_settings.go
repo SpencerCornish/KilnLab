@@ -24,6 +24,7 @@ type settingsDTO struct {
 	SlackChannelID           string       `json:"slack_channel_id"`
 	MissedStartGraceMinutes  int32        `json:"missed_start_grace_minutes"`
 	MissedUnloadGraceMinutes int32        `json:"missed_unload_grace_minutes"`
+	DayReminderHour          int32        `json:"day_reminder_hour"`
 	PublicPageDaysAhead      int32        `json:"public_page_days_ahead"`
 }
 
@@ -47,7 +48,7 @@ func toSettingsDTO(st db.Setting) settingsDTO {
 		UnderfilledThresholdPct: st.UnderfilledThresholdPct, FiringTypes: st.FiringTypes, Cones: st.Cones,
 		Programs: parsePrograms(st.Programs), DiscordChannelID: st.DiscordChannelID, SlackChannelID: st.SlackChannelID,
 		MissedStartGraceMinutes: st.MissedStartGraceMinutes, MissedUnloadGraceMinutes: st.MissedUnloadGraceMinutes,
-		PublicPageDaysAhead: st.PublicPageDaysAhead,
+		DayReminderHour: st.DayReminderHour, PublicPageDaysAhead: st.PublicPageDaysAhead,
 	}
 }
 
@@ -96,6 +97,7 @@ func (in settingsDTO) validate() (db.UpdateSettingsParams, error) {
 		intIn("Under-filled threshold", in.UnderfilledThresholdPct, 0, 100),
 		intIn("Missed start grace", in.MissedStartGraceMinutes, 0, 24*60),
 		intIn("Missed unload grace", in.MissedUnloadGraceMinutes, 0, 24*60),
+		intIn("Day reminder hour", in.DayReminderHour, 0, 23),
 		intIn("Public page days ahead", in.PublicPageDaysAhead, 1, 365),
 	} {
 		if err != nil {
@@ -139,7 +141,8 @@ func (in settingsDTO) validate() (db.UpdateSettingsParams, error) {
 		Timezone: tz, MinNoticeHours: in.MinNoticeHours, RequestCutoffHours: in.RequestCutoffHours,
 		UnderfilledThresholdPct: in.UnderfilledThresholdPct, FiringTypes: types, Cones: cones, Programs: raw,
 		DiscordChannelID: discord, SlackChannelID: slack, MissedStartGraceMinutes: in.MissedStartGraceMinutes,
-		MissedUnloadGraceMinutes: in.MissedUnloadGraceMinutes, PublicPageDaysAhead: in.PublicPageDaysAhead,
+		MissedUnloadGraceMinutes: in.MissedUnloadGraceMinutes, DayReminderHour: in.DayReminderHour,
+		PublicPageDaysAhead: in.PublicPageDaysAhead,
 	}, nil
 }
 

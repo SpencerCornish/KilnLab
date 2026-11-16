@@ -1,6 +1,8 @@
 import type {
   AdminSettings,
   AdminUser,
+  Blackout,
+  BlackoutInput,
   Kiln,
   KilnInput,
   Settings,
@@ -150,3 +152,8 @@ export const getSettings = () => request<AdminSettings>('/admin/settings')
 export const updateSettings = (s: Settings) => freshOptions(request<AdminSettings>('/admin/settings', json('PUT', s)))
 export const createKiln = (k: KilnInput) => freshOptions(request<Kiln>('/admin/kilns', json('POST', k)))
 export const updateKiln = (id: number, k: KilnInput) => freshOptions(request<Kiln>(`/admin/kilns/${id}`, json('PUT', k)))
+
+export const listBlackouts = () => request<Blackout[]>('/admin/blackouts')
+export const createBlackout = (b: BlackoutInput) => freshOptions(request<Blackout>('/admin/blackouts', json('POST', b)))
+export const deleteBlackout = (id: number) =>
+  freshOptions(request<void>(`/admin/blackouts/${id}`, { method: 'DELETE' }))

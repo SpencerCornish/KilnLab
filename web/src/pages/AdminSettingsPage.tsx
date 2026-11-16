@@ -2,9 +2,9 @@ import { useState, type FormEvent, type ReactNode } from 'react'
 import { Link, Navigate } from 'react-router'
 import { renderSVG } from 'uqr'
 import { Alert, Field, smallInputClass } from '../components/firing'
-import { createKiln, getSettings, updateKiln, updateSettings } from '../lib/api'
+import { createBlackout, createKiln, deleteBlackout, getSettings, listBlackouts, updateKiln, updateSettings } from '../lib/api'
 import { PageSpinner, useSession } from '../lib/session'
-import type { AdminSettings, Kiln, KilnInput, Settings } from '../lib/types'
+import type { AdminSettings, Blackout, Kiln, KilnInput, Settings } from '../lib/types'
 import { useLoad } from '../lib/useLoad'
 
 /** /admin/settings (§13): every studio setting, plus kilns. Admins only. */
@@ -24,6 +24,7 @@ export function AdminSettingsPage() {
       </div>
       <SettingsForm data={data} onSaved={setData} />
       <KilnsSection kilns={data.kilns} onChanged={(kilns) => setData({ ...data, kilns })} />
+      <BlackoutsSection kilns={data.kilns} />
       <Link to="/admin/qr" className="kc-key kc-key--block">
         Printable QR codes
       </Link>
@@ -137,6 +138,12 @@ function SettingsForm({ data, onSaved }: { data: AdminSettings; onSaved: (d: Adm
         <p className="kc-caption kc-caption--body">
           Reminders go out once a firing is this late being marked started, or this long past its estimated unload.
         </p>
+        <Field
+          label="Day-of reminder (hour)"
+          hint={<span className="kc-caption kc-caption--body block">Kiln masters are reminded at this hour, studio time, on the day of each firing.</span>}
+        >
+          <input type="number" min={0} max={23} className={smallInputClass} value={s.day_reminder_hour} onChange={num('day_reminder_hour')} />
+        </Field>
       </Group>
 
       <Group title="Firing options">
@@ -285,6 +292,116 @@ function KilnsSection({ kilns, onChanged }: { kilns: Kiln[]; onChanged: (k: Kiln
           + Add a kiln
         </button>
       )}
+    </section>
+  )
+}
+
+// ── Blackout dates ──────────────────────────────────────────────────────────
+
+/** Admin-only blocks: days a kiln can't take new firings (maintenance, etc.). */
+function BlackoutsSection({ kilns }: { kilns: Kiln[] }) {
+  const { data, error, setData } = useLoad(listBlackouts, [])
+  const [kilnId, setKilnId] = useState(kilns.find((k) => k.active)?.id ?? kilns[0]?.id ?? 0)
+  const [start, setStart] = useState('')
+  const [end, setEnd] = useState('')
+  const [reason, setReason] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<{ kind: 'error' | 'info'; text: string } | null>(null)
+  const kilnName = (id: number) => kilns.find((k) => k.id === id)?.name ?? `Kiln ${id}`
+
+  async function add(e: FormEvent) {
+    e.preventDefault()
+    if (!start || !end) return setMsg({ kind: 'error', text: 'Pick a first and last day.' })
+    setBusy(true)
+    setMsg(null)
+    try {
+      const created = await createBlackout({ kiln_id: kilnId, start_date: start, end_date: end, reason: reason.trim() })
+      setData((prev) =>
+        [...(prev ?? []), created].sort((a, b) => a.kiln_id - b.kiln_id || a.start_date.localeCompare(b.start_date)),
+      )
+      setStart('')
+      setEnd('')
+      setReason('')
+      setMsg({ kind: 'info', text: 'Blackout added.' })
+    } catch (err) {
+      setMsg({ kind: 'error', text: err instanceof Error ? err.message : String(err) })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function remove(b: Blackout) {
+    setMsg(null)
+    try {
+      await deleteBlackout(b.id)
+      setData((prev) => (prev ?? []).filter((x) => x.id !== b.id))
+    } catch (err) {
+      setMsg({ kind: 'error', text: err instanceof Error ? err.message : String(err) })
+    }
+  }
+
+  return (
+    <section className="space-y-3">
+      <h2 className="kc-title kc-title--sm">Blackout dates</h2>
+      <p className="kc-caption kc-caption--body">
+        Days a kiln can't take new firings (maintenance and other needs). Blacked-out days can't be proposed or
+        rescheduled onto; firings already booked are left alone.
+      </p>
+      {error && <Alert kind="error">{error}</Alert>}
+      {data && data.length > 0 ? (
+        <ul className="space-y-2">
+          {data.map((b) => (
+            <li key={b.id} className="kc-plate kc-plate--pad flex items-center justify-between gap-2">
+              <span className="min-w-0">
+                <span className="kc-label">{b.start_date === b.end_date ? b.start_date : `${b.start_date} → ${b.end_date}`}</span>
+                <span className="kc-caption kc-caption--body block">
+                  {kilnName(b.kiln_id)}
+                  {b.reason ? ` · ${b.reason}` : ''}
+                </span>
+              </span>
+              <button type="button" onClick={() => remove(b)} className="kc-key kc-key--sm shrink-0">
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="kc-caption kc-caption--body">No blackout dates.</p>
+      )}
+      <form onSubmit={add} className="kc-plate kc-plate--pad space-y-3">
+        {kilns.length > 1 && (
+          <Field label="Kiln">
+            <select className={smallInputClass} value={kilnId} onChange={(e) => setKilnId(Number(e.target.value))}>
+              {kilns.map((k) => (
+                <option key={k.id} value={k.id}>
+                  {k.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
+        <div className="grid grid-cols-2 items-end gap-3">
+          <Field label="First day">
+            <input type="date" required className={smallInputClass} value={start} onChange={(e) => setStart(e.target.value)} />
+          </Field>
+          <Field label="Last day">
+            <input type="date" required className={smallInputClass} value={end} onChange={(e) => setEnd(e.target.value)} />
+          </Field>
+        </div>
+        <Field label="Reason (optional)">
+          <input
+            maxLength={500}
+            className={smallInputClass}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="Element replacement"
+          />
+        </Field>
+        {msg && <Alert kind={msg.kind}>{msg.text}</Alert>}
+        <button disabled={busy} className="kc-key kc-key--block">
+          {busy ? 'Adding…' : '+ Add blackout'}
+        </button>
+      </form>
     </section>
   )
 }
