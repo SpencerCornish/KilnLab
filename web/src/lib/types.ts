@@ -23,10 +23,8 @@ export interface AuthProviders {
 
 export type FiringStatus =
   | 'proposed'
+  | 'scheduled'
   | 'on_hold'
-  | 'confirmed'
-  | 'loading'
-  | 'loaded'
   | 'firing'
   | 'cooling'
   | 'completed'
@@ -49,7 +47,7 @@ export interface Fullness {
 export interface Firing {
   id: number
   kiln_id: number
-  title: string | null
+  title: string
   firing_type: string
   cone: string
   notes: string
@@ -59,6 +57,8 @@ export interface Firing {
   hold_reason: string | null
   cancel_reason: string | null
   proposer: UserRef
+  /** The kiln master who took this firing, or null while it needs one. */
+  managed_by: UserRef | null
   proposer_description: string
   proposer_share_pct: number
   proposer_cone: string
@@ -67,14 +67,15 @@ export interface Firing {
   requests_close_at: string
   requests_closed_manually: boolean
   requests_open: boolean
-  program: string | null
-  estimated_duration_minutes: number | null
+  profile_id: number | null
+  firing_minutes: number
+  cooldown_minutes: number
   started_at: string | null
-  estimated_unload_at: string | null
+  firing_ends_at: string | null
+  unloadable_at: string | null
   cooling_at: string | null
   unloaded_at: string | null
-  ready_for_pickup_at: string | null
-  completed_at: string | null
+  ready_to_unload: boolean
   created_at: string
 }
 
@@ -126,7 +127,9 @@ export interface FiringEvent {
 export interface FiringPerms {
   request: boolean
   manage: boolean
-  confirm: boolean
+  claim: boolean
+  unclaim: boolean
+  change_profile: boolean
   hold: boolean
   release: boolean
   reschedule: boolean
@@ -160,6 +163,30 @@ export interface Kiln {
   share_per_shelf_pct: number | null
 }
 
+export interface Profile {
+  id: number
+  kiln_id: number
+  name: string
+  firing_type: string
+  cone: string
+  firing_minutes: number
+  cooldown_minutes: number
+  active: boolean
+}
+
+export interface ProfileValues {
+  name: string
+  firing_type: string
+  cone: string
+  firing_minutes: number
+  cooldown_minutes: number
+}
+
+export interface ProfileInput extends ProfileValues {
+  kiln_id: number
+  active: boolean
+}
+
 export interface Blackout {
   id: number
   kiln_id: number
@@ -185,26 +212,23 @@ export interface Options {
   cones: string[]
   /** Active kilns first; inactive ones are kept so old firings still show their kiln. */
   kilns: Kiln[]
-  programs: Program[]
+  /** Active firing profiles, filtered by kiln in the proposal form. */
+  profiles: Profile[]
   /** Dates each kiln can't take new firings. */
   blackouts: Blackout[]
-}
-
-export interface Program {
-  name: string
-  default_duration_minutes?: number
 }
 
 export interface KilnFiring {
   id: number
   kiln_id: number
-  title: string | null
+  title: string
   firing_type: string
   cone: string
   /** YYYY-MM-DD: the day it's booked for. No start time is promised. */
   scheduled_date: string
   status: FiringStatus
   proposer_name: string
+  owner_name: string
 }
 
 export interface KilnView {
@@ -215,8 +239,6 @@ export interface KilnView {
 export interface AdvanceInput {
   to: FiringStatus
   occurred_at?: string | null
-  program?: string | null
-  estimated_duration_minutes?: number | null
   note?: string | null
   source: 'web' | 'kiln_qr'
 }
@@ -234,9 +256,9 @@ export interface AdminUser {
 
 export interface NewFiring {
   kiln_id: number
-  firing_type: string
-  cone: string
-  title: string | null
+  /** Exactly one of profile_id/custom is set. */
+  profile_id: number | null
+  custom: ProfileValues | null
   notes: string
   /** YYYY-MM-DD: the day it's booked for. No start time is promised. */
   scheduled_date: string
@@ -244,6 +266,8 @@ export interface NewFiring {
   share_pct: number
   proposer_cone: string
   clay_body: string | null
+  /** Custom values only; kiln masters/admins. */
+  save_profile: boolean
 }
 
 export interface RequestInput {
@@ -278,7 +302,7 @@ export interface NotificationLog {
 export interface PublicFiring {
   id: number
   kiln_name?: string
-  title: string | null
+  title: string
   firing_type: string
   cone: string
   /** YYYY-MM-DD: the day it's booked for. No start time is promised. */
@@ -290,7 +314,7 @@ export interface PublicFiring {
   requests_open: boolean
   participant_count: number
   started_at: string | null
-  estimated_unload_at: string | null
+  unloadable_at: string | null
 }
 
 export interface Upcoming {
@@ -308,11 +332,11 @@ export interface Settings {
   underfilled_threshold_pct: number
   firing_types: string[]
   cones: string[]
-  programs: Program[]
   discord_channel_id: string
   slack_channel_id: string
   missed_start_grace_minutes: number
   missed_unload_grace_minutes: number
+  escalation_grace_minutes: number
   day_reminder_hour: number
   public_page_days_ahead: number
 }
@@ -320,6 +344,7 @@ export interface Settings {
 export interface AdminSettings {
   settings: Settings
   kilns: Kiln[]
+  profiles: Profile[]
   env: {
     base_url: string
     discord_bot: boolean

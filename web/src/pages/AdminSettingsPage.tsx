@@ -2,9 +2,20 @@ import { useState, type FormEvent, type ReactNode } from 'react'
 import { Link, Navigate } from 'react-router'
 import { renderSVG } from 'uqr'
 import { Alert, Field, smallInputClass } from '../components/firing'
-import { createBlackout, createKiln, deleteBlackout, getSettings, listBlackouts, updateKiln, updateSettings } from '../lib/api'
+import {
+  createBlackout,
+  createKiln,
+  createProfile,
+  deactivateProfile,
+  deleteBlackout,
+  getSettings,
+  listBlackouts,
+  updateKiln,
+  updateProfile,
+  updateSettings,
+} from '../lib/api'
 import { PageSpinner, useSession } from '../lib/session'
-import type { AdminSettings, Blackout, Kiln, KilnInput, Settings } from '../lib/types'
+import type { AdminSettings, Blackout, Kiln, KilnInput, Profile, ProfileInput, Settings } from '../lib/types'
 import { useLoad } from '../lib/useLoad'
 
 /** /admin/settings (§13): every studio setting, plus kilns. Admins only. */
@@ -24,6 +35,13 @@ export function AdminSettingsPage() {
       </div>
       <SettingsForm data={data} onSaved={setData} />
       <KilnsSection kilns={data.kilns} onChanged={(kilns) => setData({ ...data, kilns })} />
+      <ProfilesSection
+        kilns={data.kilns}
+        profiles={data.profiles}
+        types={data.settings.firing_types}
+        cones={data.settings.cones}
+        onChanged={(profiles) => setData({ ...data, profiles })}
+      />
       <BlackoutsSection kilns={data.kilns} />
       <Link to="/admin/qr" className="kc-key kc-key--block">
         Printable QR codes
@@ -34,21 +52,10 @@ export function AdminSettingsPage() {
 
 // ── Settings form ───────────────────────────────────────────────────────────
 
-interface ProgramRow {
-  name: string
-  hours: string
-}
-
 function SettingsForm({ data, onSaved }: { data: AdminSettings; onSaved: (d: AdminSettings) => void }) {
   const [s, setS] = useState<Settings>(data.settings)
   const [types, setTypes] = useState(data.settings.firing_types.join(', '))
   const [cones, setCones] = useState(data.settings.cones.join(', '))
-  const [programs, setPrograms] = useState<ProgramRow[]>(
-    data.settings.programs.map((p) => ({
-      name: p.name,
-      hours: p.default_duration_minutes ? String(+(p.default_duration_minutes / 60).toFixed(2)) : '',
-    })),
-  )
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ kind: 'error' | 'info'; text: string } | null>(null)
 
@@ -64,12 +71,6 @@ function SettingsForm({ data, onSaved }: { data: AdminSettings; onSaved: (d: Adm
         ...s,
         firing_types: split(types),
         cones: split(cones),
-        programs: programs
-          .filter((p) => p.name.trim())
-          .map((p) => {
-            const h = parseFloat(p.hours)
-            return { name: p.name.trim(), default_duration_minutes: h > 0 ? Math.round(h * 60) : undefined }
-          }),
       })
       onSaved(out)
       setMsg({ kind: 'info', text: 'Saved.' })
@@ -135,8 +136,20 @@ function SettingsForm({ data, onSaved }: { data: AdminSettings; onSaved: (d: Adm
             />
           </Field>
         </div>
+        <Field
+          label="Escalate again after (min)"
+          hint={<span className="kc-caption kc-caption--body block">If the owner still hasn't acted, every kiln master and admin is told after this extra delay.</span>}
+        >
+          <input
+            type="number"
+            min={0}
+            className={smallInputClass}
+            value={s.escalation_grace_minutes}
+            onChange={num('escalation_grace_minutes')}
+          />
+        </Field>
         <p className="kc-caption kc-caption--body">
-          Reminders go out once a firing is this late being marked started, or this long past its estimated unload.
+          Reminders go out once a firing is this late being marked started, or this long past its ready-to-unload time.
         </p>
         <Field
           label="Day-of reminder (hour)"
@@ -153,46 +166,6 @@ function SettingsForm({ data, onSaved }: { data: AdminSettings; onSaved: (d: Adm
         <Field label="Cones" hint={<span className="kc-caption kc-caption--body block">Comma-separated, in the order to show them.</span>}>
           <input className={smallInputClass} value={cones} onChange={(e) => setCones(e.target.value)} />
         </Field>
-        <div className="space-y-2">
-          <span className="kc-field__label">Controller programs</span>
-          <p className="kc-caption kc-caption--body">Offered when starting a firing. The duration fills in the estimate.</p>
-          {programs.map((p, i) => (
-            <div key={i} className="flex items-center gap-2">
-              <input
-                aria-label="Program name"
-                placeholder="Name"
-                className={`${smallInputClass} min-w-0 flex-1`}
-                value={p.name}
-                onChange={(e) => setPrograms(programs.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))}
-              />
-              <div className="w-20 shrink-0">
-                <input
-                  aria-label="Typical hours"
-                  placeholder="Hours"
-                  inputMode="decimal"
-                  className={smallInputClass}
-                  value={p.hours}
-                  onChange={(e) => setPrograms(programs.map((x, j) => (j === i ? { ...x, hours: e.target.value } : x)))}
-                />
-              </div>
-              <button
-                type="button"
-                aria-label={`Remove ${p.name || 'program'}`}
-                onClick={() => setPrograms(programs.filter((_, j) => j !== i))}
-                className="kc-key kc-key--icon"
-              >
-                ×
-              </button>
-            </div>
-          ))}
-          <button
-            type="button"
-            onClick={() => setPrograms([...programs, { name: '', hours: '' }])}
-            className="kc-key kc-key--sm"
-          >
-            + Add program
-          </button>
-        </div>
       </Group>
 
       <Group title="Notifications">
@@ -293,6 +266,201 @@ function KilnsSection({ kilns, onChanged }: { kilns: Kiln[]; onChanged: (k: Kiln
         </button>
       )}
     </section>
+  )
+}
+
+// ── Firing profiles (per kiln) ──────────────────────────────────────────────
+
+function ProfilesSection({
+  kilns,
+  profiles,
+  types,
+  cones,
+  onChanged,
+}: {
+  kilns: Kiln[]
+  profiles: Profile[]
+  types: string[]
+  cones: string[]
+  onChanged: (p: Profile[]) => void
+}) {
+  const [editing, setEditing] = useState<number | 'new' | null>(null)
+  const kilnName = (id: number) => kilns.find((k) => k.id === id)?.name ?? `Kiln ${id}`
+  const ordered = [...profiles].sort((a, b) => a.kiln_id - b.kiln_id || a.name.localeCompare(b.name))
+
+  return (
+    <section className="space-y-3">
+      <h2 className="kc-title kc-title--sm">Firing profiles</h2>
+      <p className="kc-caption kc-caption--body">
+        Presets proposers choose from, per kiln. The name is the firing's name; the two times drive the automatic
+        cooling and ready-to-unload phases.
+      </p>
+      {ordered.length === 0 && <p className="kc-caption kc-caption--body">No profiles yet. Add one so people can propose firings.</p>}
+      {ordered.map((p) =>
+        editing === p.id ? (
+          <ProfileForm
+            key={p.id}
+            kilns={kilns}
+            types={types}
+            cones={cones}
+            initial={p}
+            onCancel={() => setEditing(null)}
+            onDeactivate={async () => {
+              const saved = await deactivateProfile(p.id)
+              onChanged(profiles.map((x) => (x.id === p.id ? saved : x)))
+              setEditing(null)
+            }}
+            onSave={async (input) => {
+              const saved = await updateProfile(p.id, input)
+              onChanged(profiles.map((x) => (x.id === p.id ? saved : x)))
+              setEditing(null)
+            }}
+          />
+        ) : (
+          <button key={p.id} onClick={() => setEditing(p.id)} className="kc-plate kc-plate--pad kc-plate--link w-full space-y-1 text-left">
+            <span className="flex items-center justify-between gap-2">
+              <span className="kc-label kc-label--lg">{p.name}</span>
+              <span className="flex items-center gap-2">
+                {!p.active && <span className="kc-tag kc-tag--void">Inactive</span>}
+                <span className="kc-tag">{kilnName(p.kiln_id)}</span>
+              </span>
+            </span>
+            <span className="kc-caption kc-caption--body block">
+              <span className="capitalize">{p.firing_type}</span> · Cone {p.cone} · about{' '}
+              {Math.round((p.firing_minutes / 60) * 10) / 10}h firing + {Math.round((p.cooldown_minutes / 60) * 10) / 10}h cooldown
+            </span>
+          </button>
+        ),
+      )}
+      {editing === 'new' ? (
+        <ProfileForm
+          kilns={kilns}
+          types={types}
+          cones={cones}
+          onCancel={() => setEditing(null)}
+          onSave={async (input) => {
+            const saved = await createProfile(input)
+            onChanged([...profiles, saved])
+            setEditing(null)
+          }}
+        />
+      ) : (
+        <button onClick={() => setEditing('new')} className="kc-key kc-key--block">
+          + Add a profile
+        </button>
+      )}
+    </section>
+  )
+}
+
+function ProfileForm({
+  kilns,
+  types,
+  cones,
+  initial,
+  onSave,
+  onCancel,
+  onDeactivate,
+}: {
+  kilns: Kiln[]
+  types: string[]
+  cones: string[]
+  initial?: Profile
+  onSave: (p: ProfileInput) => Promise<void>
+  onCancel: () => void
+  onDeactivate?: () => Promise<void>
+}) {
+  const [kilnId, setKilnId] = useState(initial?.kiln_id ?? kilns.find((k) => k.active)?.id ?? kilns[0]?.id ?? 0)
+  const [name, setName] = useState(initial?.name ?? '')
+  const [type, setType] = useState(initial?.firing_type ?? types[0] ?? 'glaze')
+  const [cone, setCone] = useState(initial?.cone ?? cones[0] ?? '6')
+  const [hours, setHours] = useState(initial ? String(Math.round((initial.firing_minutes / 60) * 100) / 100) : '10')
+  const [cooldown, setCooldown] = useState(initial ? String(Math.round((initial.cooldown_minutes / 60) * 100) / 100) : '14')
+  const [active, setActive] = useState(initial?.active ?? true)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function submit(e: FormEvent) {
+    e.preventDefault()
+    setBusy(true)
+    setError(null)
+    try {
+      await onSave({
+        kiln_id: kilnId,
+        name,
+        firing_type: type,
+        cone,
+        firing_minutes: Math.round(Number(hours) * 60),
+        cooldown_minutes: Math.round(Number(cooldown) * 60),
+        active,
+      })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+      setBusy(false)
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="kc-plate kc-plate--pad space-y-3">
+      <Field label="Kiln">
+        <select className={smallInputClass} value={kilnId} onChange={(e) => setKilnId(Number(e.target.value))}>
+          {kilns.map((k) => (
+            <option key={k.id} value={k.id}>
+              {k.name}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Field label="Firing name">
+        <input required maxLength={120} className={smallInputClass} value={name} onChange={(e) => setName(e.target.value)} placeholder="Cone 06 Bisque — fast" />
+      </Field>
+      <div className="grid grid-cols-2 items-end gap-3">
+        <Field label="Type">
+          <select className={`${smallInputClass} capitalize`} value={type} onChange={(e) => setType(e.target.value)}>
+            {types.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Cone">
+          <select className={smallInputClass} value={cone} onChange={(e) => setCone(e.target.value)}>
+            {cones.map((c) => (
+              <option key={c} value={c}>
+                Cone {c}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </div>
+      <div className="grid grid-cols-2 items-end gap-3">
+        <Field label="Firing time (hours)">
+          <input required type="number" inputMode="decimal" min={0.01} max={168} step={0.25} className={smallInputClass} value={hours} onChange={(e) => setHours(e.target.value)} />
+        </Field>
+        <Field label="Cooldown (hours)">
+          <input required type="number" inputMode="decimal" min={0} max={168} step={0.25} className={smallInputClass} value={cooldown} onChange={(e) => setCooldown(e.target.value)} />
+        </Field>
+      </div>
+      <label className="kc-check">
+        <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} className="kc-checkbox" />
+        Active (offer this profile to proposers)
+      </label>
+      {error && <Alert kind="error">{error}</Alert>}
+      <div className="kc-keys kc-keys--fill">
+        <button type="submit" disabled={busy} className="kc-key kc-key--go">
+          {busy ? 'Saving…' : 'Save profile'}
+        </button>
+        <button type="button" onClick={onCancel} className="kc-key">
+          Cancel
+        </button>
+        {onDeactivate && active && (
+          <button type="button" disabled={busy} onClick={() => void onDeactivate()} className="kc-key kc-key--danger">
+            Deactivate
+          </button>
+        )}
+      </div>
+    </form>
   )
 }
 

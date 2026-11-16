@@ -73,18 +73,11 @@ a { color: var(--cobalt); }
 }
 .kc-status[data-status="proposed"] { --lamp: var(--readout-amber); }
 .kc-status[data-status="on_hold"] { --lamp: var(--readout-amber); }
-.kc-status[data-status="confirmed"] { --lamp: var(--readout-green); }
-.kc-status[data-status="loading"] { --lamp: var(--readout-red); }
-.kc-status[data-status="loaded"] { --lamp: var(--readout-red); }
+.kc-status[data-status="scheduled"] { --lamp: var(--readout-green); }
 .kc-status[data-status="firing"] { --lamp: var(--readout-red); }
 .kc-status[data-status="cooling"] { --lamp: var(--readout-amber); }
-.kc-status[data-status="unloaded"] { --lamp: var(--readout-green); }
-.kc-status[data-status="ready_for_pickup"] { --lamp: var(--readout-green); }
 .kc-status[data-status="completed"] { --lamp: var(--bezel-muted); }
 .kc-status[data-status="proposed"]::before,
-.kc-status[data-status="loading"]::before,
-.kc-status[data-status="loaded"]::before,
-.kc-status[data-status="unloaded"]::before,
 .kc-status[data-status="cancelled"]::before { background: transparent; }
 .kc-status[data-status="cancelled"] { color: var(--bezel-muted); text-decoration: line-through; }
 

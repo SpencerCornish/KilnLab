@@ -13,10 +13,8 @@ export function kilnLabel(options: Options, kilnId: number): string | null {
 
 export const STATUS_LABELS: Record<FiringStatus, string> = {
   proposed: 'Proposed',
+  scheduled: 'Scheduled',
   on_hold: 'On hold',
-  confirmed: 'Confirmed',
-  loading: 'Loading',
-  loaded: 'Loaded',
   firing: 'Firing',
   cooling: 'Cooling',
   completed: 'Completed',
@@ -130,6 +128,11 @@ export function FiringCard({ firing, options }: { firing: FiringSummary; options
           )}
         </h3>
         {kiln && <p className="kc-caption kc-caption--body">{kiln}</p>}
+        {firing.status !== 'completed' && firing.status !== 'cancelled' && (
+          <p className={`kc-caption kc-caption--body${firing.managed_by ? '' : ' kc-warning'}`}>
+            {firing.managed_by ? `Run by ${firing.managed_by.name}` : 'Needs a kiln master'}
+          </p>
+        )}
         {firing.status !== 'cancelled' && (
           <>
             <FullnessBar fullness={firing.fullness} caption="none" />

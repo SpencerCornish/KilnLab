@@ -29,7 +29,7 @@ export function KilnPage() {
       {view.firings.length === 0 ? (
         <div className="kc-plate kc-plate--pad space-y-4 text-center">
           <p className="kc-title kc-title--sm">No active firing</p>
-          <p className="kc-caption kc-caption--body">Nothing is loading or running, and nothing confirmed starts within a day.</p>
+          <p className="kc-caption kc-caption--body">Nothing is loading or running, and nothing scheduled starts within a day.</p>
           <Link to="/" className="kc-key kc-key--block kc-key--fire">
             See the schedule
           </Link>
@@ -49,6 +49,7 @@ export function KilnPage() {
                   <p className="kc-caption kc-caption--body">
                     {!view.kiln && kilnLabel(options, f.kiln_id) && `${kilnLabel(options, f.kiln_id)} · `}
                     {f.proposer_name}
+                    {f.owner_name ? ` · run by ${f.owner_name}` : ' · needs a kiln master'}
                   </p>
                 </div>
               </Link>
@@ -105,13 +106,13 @@ export function KilnFiringPage() {
             {kilnLabel(options, f.kiln_id) && `${kilnLabel(options, f.kiln_id)} · `}
             {f.fullness.display_pct}% full · {1 + detail.requests.filter((r) => r.status === 'approved').length} people
           </p>
-          {f.status === 'firing' && f.estimated_unload_at && (
+          {(f.status === 'firing' || f.status === 'cooling') && f.unloadable_at && (
             <div className="kc-readout">
-              <span className="kc-readout__label">Estimated unload</span>
-              <span className="kc-readout__value">{formatWhen(f.estimated_unload_at, tz)}</span>
+              <span className="kc-readout__label">Ready to unload</span>
+              <span className="kc-readout__value">{formatWhen(f.unloadable_at, tz)}</span>
             </div>
           )}
-          {f.program && <p className="kc-data kc-muted">Program: {f.program}</p>}
+          {f.managed_by && <p className="kc-data kc-muted">Run by {f.managed_by.name}</p>}
         </div>
       </section>
 

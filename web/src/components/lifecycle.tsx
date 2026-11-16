@@ -6,10 +6,7 @@ import { Alert, Field, inputClass, STATUS_LABELS } from './firing'
 
 /** Button text per target status (§9B). */
 export const STEP_LABELS: Partial<Record<FiringStatus, string>> = {
-  loading: 'Start loading',
-  loaded: 'Loaded',
   firing: 'START FIRING',
-  cooling: 'Kiln off: cooling',
   completed: 'Unloaded: ready for pickup',
 }
 
@@ -83,28 +80,19 @@ function ConfirmStep({
   const tz = options.timezone
   const f = detail.firing
   const [when, setWhen] = useState(() => nowInput(tz))
-  const [program, setProgram] = useState(options.programs[0]?.name ?? '')
-  const [customProgram, setCustomProgram] = useState('')
-  const [hours, setHours] = useState(() => {
-    const d = options.programs[0]?.default_duration_minutes
-    return d ? String(d / 60) : ''
-  })
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
   const isStart = step === 'firing'
-  const programName = program === '__other' || options.programs.length === 0 ? customProgram.trim() : program
-  const minutes = Math.round(Number(hours) * 60)
   const startISO = fromInputValue(when, tz)
-  const estUnload =
-    isStart && startISO && minutes > 0 ? new Date(new Date(startISO).getTime() + minutes * 60_000).toISOString() : null
-
-  function pickProgram(name: string) {
-    setProgram(name)
-    const d = options.programs.find((p) => p.name === name)?.default_duration_minutes
-    if (d) setHours(String(d / 60))
-  }
+  const estimatedStart = isStart ? startISO : f.started_at
+  const firingEnds =
+    isStart && startISO ? new Date(new Date(startISO).getTime() + f.firing_minutes * 60_000).toISOString() : f.firing_ends_at
+  const unloadable =
+    isStart && startISO
+      ? new Date(new Date(startISO).getTime() + (f.firing_minutes + f.cooldown_minutes) * 60_000).toISOString()
+      : f.unloadable_at
 
   async function submit(e: FormEvent) {
     e.preventDefault()
@@ -115,8 +103,6 @@ function ConfirmStep({
         to: step,
         // Only send a time when it was changed, so phone clock drift doesn't matter.
         occurred_at: detail.can.backdate && when !== nowInput(tz) ? startISO : null,
-        program: isStart ? programName : null,
-        estimated_duration_minutes: isStart ? minutes : null,
         note: note.trim() || null,
         source,
       })
@@ -130,49 +116,25 @@ function ConfirmStep({
   return (
     <form onSubmit={submit} className="kc-plate kc-plate--pad kc-plate--strong space-y-4">
       <h2 className="kc-title kc-title--sm">
-        {isStart ? 'Start the firing' : step === 'completed' ? 'Unloaded and ready for pickup' : `Mark as ${STATUS_LABELS[step].toLowerCase()}`}
+        {isStart ? 'Start the firing' : 'Unloaded and ready for pickup'}
       </h2>
 
-      {isStart && (
-        <>
-          <Field label="Program">
-            {options.programs.length > 0 && (
-              <span className="kc-select-wrap">
-                <select value={program} onChange={(e) => pickProgram(e.target.value)} className="kc-select">
-                  {options.programs.map((p) => (
-                    <option key={p.name} value={p.name}>
-                      {p.name}
-                    </option>
-                  ))}
-                  <option value="__other">Other…</option>
-                </select>
-              </span>
-            )}
-            {(program === '__other' || options.programs.length === 0) && (
-              <input
-                required
-                maxLength={100}
-                value={customProgram}
-                onChange={(e) => setCustomProgram(e.target.value)}
-                placeholder="e.g. Slow glaze cone 6"
-                className={inputClass}
-              />
-            )}
-          </Field>
-          <Field label="Estimated duration (hours)">
-            <input
-              required
-              type="number"
-              inputMode="decimal"
-              min={0.25}
-              max={168}
-              step={0.25}
-              value={hours}
-              onChange={(e) => setHours(e.target.value)}
-              className={`${inputClass} kc-input--number`}
-            />
-          </Field>
-        </>
+      <p className="kc-caption kc-caption--body">
+        {f.title} · about {Math.round((f.firing_minutes / 60) * 10) / 10}h firing +{' '}
+        {Math.round((f.cooldown_minutes / 60) * 10) / 10}h cooldown
+      </p>
+
+      {isStart && firingEnds && unloadable && (
+        <Alert kind="info">
+          Kiln off around <strong>{formatWhen(firingEnds, tz)}</strong>; ready to unload around{' '}
+          <strong>{formatWhen(unloadable, tz)}</strong>.
+        </Alert>
+      )}
+      {estimatedStart && !isStart && (
+        <p className="kc-caption kc-caption--body">
+          Started {formatWhen(estimatedStart, tz)}
+          {unloadable && ` · estimated ready ${formatWhen(unloadable, tz)}`}
+        </p>
       )}
 
       {detail.can.backdate && (
@@ -181,14 +143,14 @@ function ConfirmStep({
         </Field>
       )}
 
-      {estUnload && (
-        <Alert kind="info">
-          Estimated unload: <strong>{formatWhen(estUnload, tz)}</strong>
+      {step === 'completed' && (
+        <Alert kind="warning">
+          Everyone with work in this firing will be told it's ready for pickup.
+          {unloadable && !f.ready_to_unload && ' The estimate says it may still be hot; unload only if the kiln is cool.'}
         </Alert>
       )}
-      {step === 'completed' && <Alert kind="warning">Everyone with work in this firing will be told it's ready for pickup.</Alert>}
 
-      {['loaded', 'cooling', 'completed', 'firing'].includes(step) && (
+      {['completed', 'firing'].includes(step) && (
         <Field label="Note (optional)">
           <input value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} className={inputClass} />
         </Field>
@@ -241,8 +203,8 @@ export function CorrectTimeForm({
       <Field label={TIME_ROWS.find((r) => r.field === field)?.label ?? field}>
         <input type="datetime-local" required value={value} onChange={(e) => setValue(e.target.value)} className={inputClass} />
       </Field>
-      {field === 'started_at' && detail.firing.estimated_duration_minutes && (
-        <p className="kc-caption kc-caption--body">The estimated unload time moves with it.</p>
+      {field === 'started_at' && (
+        <p className="kc-caption kc-caption--body">The estimated cool and unload times move with it.</p>
       )}
       <button type="submit" disabled={busy} className="kc-key kc-key--block kc-key--fire">
         {busy ? 'Saving…' : 'Save time'}
