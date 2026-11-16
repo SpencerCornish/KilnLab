@@ -343,6 +343,17 @@ func (r *Runner) RecheckMembers(ctx context.Context) error {
 			}
 			r.log.Info("kiln master role changed", "user", a.UserID, "provider", a.Provider, "kiln_master", km)
 		}
+		if !km {
+			// If that was their last KM account, don't leave active firings with a
+			// stale owner: treat them as unclaimed for all notifications and UI.
+			if still, err := q.UserIsKilnMaster(ctx, a.UserID); err != nil {
+				errs = append(errs, err)
+			} else if !still {
+				if err := q.ClearManagedFirings(ctx, &a.UserID); err != nil {
+					errs = append(errs, err)
+				}
+			}
+		}
 		if !m.Member {
 			n, err := q.DeleteUserSessions(ctx, a.UserID)
 			if err != nil {

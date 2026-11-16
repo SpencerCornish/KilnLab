@@ -180,6 +180,21 @@ func (q *Queries) ClaimFiring(ctx context.Context, arg ClaimFiringParams) (Firin
 	return i, err
 }
 
+const clearManagedFirings = `-- name: ClearManagedFirings :exec
+UPDATE firings
+SET managed_by_user_id = NULL,
+    assigned_at = NULL,
+    updated_at = now()
+WHERE managed_by_user_id = $1
+  AND status NOT IN ('completed', 'cancelled')
+`
+
+// A user who is no longer a kiln master shouldn't keep ownership of active firings.
+func (q *Queries) ClearManagedFirings(ctx context.Context, userID *int64) error {
+	_, err := q.db.Exec(ctx, clearManagedFirings, userID)
+	return err
+}
+
 const correctTimestamps = `-- name: CorrectTimestamps :one
 UPDATE firings
 SET started_at = $1,

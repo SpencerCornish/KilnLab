@@ -95,6 +95,15 @@ SET managed_by_user_id = NULL,
 WHERE id = sqlc.arg(id)
 RETURNING *;
 
+-- name: ClearManagedFirings :exec
+-- A user who is no longer a kiln master shouldn't keep ownership of active firings.
+UPDATE firings
+SET managed_by_user_id = NULL,
+    assigned_at = NULL,
+    updated_at = now()
+WHERE managed_by_user_id = sqlc.arg(user_id)
+  AND status NOT IN ('completed', 'cancelled');
+
 -- name: SetFiringProfile :one
 -- Updates the profile snapshot. Callers recompute request compatibility when the
 -- type/cone changes.
